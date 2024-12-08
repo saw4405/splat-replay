@@ -213,9 +213,3 @@ class SplatReplay:
         if self._youtube:
             self._upload_queue.put((self._youtube, new_path, file_name, f"{file_name}の試合をプレイしました"))
             print("YouTubeにアップロードするタスクを追加しました")
-
-if __name__ == '__main__':
-
-    dotenv.load_dotenv()
-    splat_replay = SplatReplay()
-    splat_replay.run()
