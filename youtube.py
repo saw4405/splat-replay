@@ -39,7 +39,7 @@ class Youtube:
         youtube = build(API_NAME, API_VERSION, credentials=credentials)
         return youtube
 
-    def upload(self, path: str, title: str, description: str, category: str = '22', privacy_status: str = 'private'):
+    def upload(self, path: str, title: str, description: str, category: str = '22', privacy_status: str = 'private') -> bool:
         try:
             # Specify the file to upload
             media_file = MediaFileUpload(path, mimetype='video/*', resumable=True)
@@ -66,8 +66,10 @@ class Youtube:
             
             print(f'Video "{title}" uploaded successfully!')
             print(f'Video ID: {response["id"]}')
-            return response
+            return True
         except google.auth.exceptions.GoogleAuthError as e:
             print(f"Authentication failed: {e}")
+            return False
         except Exception as e:
             print(f"An error occurred: {e}")
+            return False

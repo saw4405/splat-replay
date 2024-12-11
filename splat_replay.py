@@ -1,14 +1,17 @@
 import os
 import time
 import datetime
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 from enum import Enum
 import threading
-import queue
+from dataclasses import dataclass
+from collections import defaultdict
+import shutil
+import glob
 
 import cv2
 import numpy as np
-import dotenv
+import schedule
 
 from obs import Obs
 from template_matcher import TemplateMatcher
@@ -22,7 +25,6 @@ class RecordStatus(Enum):
 class SplatReplay:
 
     def __init__(self):
-        self._keep_running = True
         self._load_templates()
         self._start_obs()
         self._setup_capture()
@@ -65,28 +67,136 @@ class SplatReplay:
 
     def _setup_upload(self):
         upload = bool(os.environ["UPLOAD_YOUTUBE"])
-        self._youtube = Youtube() if upload == True else None
-        self._upload_queue = queue.Queue() if upload == True else None
-        self._uploader_thread = threading.Thread(target=self._uploader_loop, daemon=True) if upload == True else None
-        if self._uploader_thread:
-            self._uploader_thread.start()
-    
-    def _uploader_loop(self):
-        while self._keep_running:
-            try:
-                task: Tuple[Youtube, str, str] = self._upload_queue.get(timeout=60)
-                if task:
-                    youtube, path, title, description = task
-                    try:
-                        print(f"YouTubeにアップロード中: {title}")
-                        youtube.upload(path, title, description)
-                        print(f"YouTubeにアップロード完了: {title}")
-                    except Exception as e:
-                        print(f"アップロード中にエラーが発生しました: {e}")
-                    finally:
-                        self._upload_queue.task_done()
-            except queue.Empty:
-                continue  # タスクがなくてもスレッドを維持
+        if not upload:
+            self._uploader_thread = None
+            return
+        
+        def run_schedule():
+            while True:
+                schedule.run_pending()
+                time.sleep(360)
+
+        self._youtube = Youtube()
+        upload_time = os.environ["UPLOAD_TIME"]
+        schedule.every().day.at(upload_time).do(self._upload_daily)
+        self._uploader_thread = threading.Thread(target=run_schedule, daemon=True)
+        self._uploader_thread.start()
+        print(f"アップロードスケジュールを設定しました: {upload_time}")
+
+    def _upload_daily(self):
+        print("アップロード処理を開始します")
+
+        @dataclass
+        class UploadFile:
+            file_name: str
+            path: str
+            start_datetime: datetime.datetime
+            buttle: str
+            rule: str
+            result: str
+            length: float
+        
+        def timedelta_to_mmss(td):
+            total_seconds = int(td.total_seconds())  # 総秒数を取得
+            minutes, seconds = divmod(total_seconds, 60)  # 分と秒に分割
+            return f"{minutes:02}:{seconds:02}"  # ゼロ埋めでフォーマット
+
+        def split_by_time_ranges(upload_files: List[UploadFile]) -> Dict[int, List[UploadFile]]:
+            time_ranges = [
+                (datetime.time(1, 0), datetime.time(3, 0)),
+                (datetime.time(3, 0), datetime.time(5, 0)),
+                (datetime.time(5, 0), datetime.time(7, 0)),
+                (datetime.time(7, 0), datetime.time(9, 0)),
+                (datetime.time(9, 0), datetime.time(11, 0)),
+                (datetime.time(11, 0), datetime.time(13, 0)),
+                (datetime.time(13, 0), datetime.time(15, 0)),
+                (datetime.time(15, 0), datetime.time(17, 0)),
+                (datetime.time(17, 0), datetime.time(19, 0)),
+                (datetime.time(19, 0), datetime.time(21, 0)),
+                (datetime.time(21, 0), datetime.time(23, 0)),
+                (datetime.time(23, 0), datetime.time(1, 0))  # 日をまたぐ時間帯
+            ]
+            # 時間帯ごとのリストを格納する辞書
+            buckets = defaultdict(list)
+
+            for upload_file in upload_files:
+                file_datetime = upload_file.start_datetime
+                file_date = file_datetime.date()
+                file_time = file_datetime.time()
+                buttle = upload_file.buttle
+                rule = upload_file.rule
+                
+                for idx, (start, end) in enumerate(time_ranges):
+                    if start < end:  # 通常の時間帯
+                        if start <= file_time < end:
+                            bucket_key = (file_date, start, buttle, rule)
+                            buckets[bucket_key].append(upload_file)
+                            break
+                    else:  # 日をまたぐ時間帯 (23:00-1:00)
+                        if file_time >= start or file_time < end:
+                            # 日をまたぐ場合は1:00を含む日付に調整
+                            adjusted_date = file_date if file_time >= start else file_date - datetime.timedelta(days=1)
+                            bucket_key = (adjusted_date, start, buttle, rule)
+                            buckets[bucket_key].append(upload_file)
+                            break
+
+            return buckets
+
+        directory = os.path.join(os.path.dirname(__file__), "out")
+        files = glob.glob(f'{directory}/*.*')
+        update_files: List[UploadFile] = []
+        for path in files:
+            file = os.path.basename(path)
+            start_datetime_str, buttle, rule, result = os.path.splitext(file)[0].split("_")
+            start_datetime = datetime.datetime.strptime(start_datetime_str, "%Y-%m-%d %H-%M-%S")
+            video = cv2.VideoCapture(path)
+            length = video.get(cv2.CAP_PROP_FRAME_COUNT) / video.get(cv2.CAP_PROP_FPS)
+            video.release()
+            update_files.append(UploadFile(file, path, start_datetime, buttle, rule, result, length))
+
+        buckets = split_by_time_ranges(update_files)
+        for key, files in buckets.items():        
+            day: datetime.date = key[0]
+            time: datetime.time = key[1]
+            buttle: str = key[2]
+            rule: str = key[3]
+            extention = os.path.splitext(files[0].file_name)[1]
+            file_name = f"{day.strftime("%Y-%m-%d")}_{time.strftime("%H")}_{buttle}_{rule}{extention}"
+            path = os.path.join(directory, "upload", file_name)
+
+            if len(files) == 1:
+                shutil.copyfile(files[0].file_name, path)
+                
+            else:
+                concat_list = "list.txt"
+                concat_list_path = os.path.join(directory, concat_list)
+                with open(concat_list_path, "w", encoding="utf-8") as f:
+                    f.writelines([f"file '{os.path.basename(file.file_name)}'\n" for file in files])
+
+                os.chdir(directory)
+                command = f"ffmpeg -f concat -safe 0 -i {concat_list} -c copy temp{extention}"
+                os.system(command)
+                os.rename(f"temp{extention}", path)
+                os.remove(concat_list_path)
+
+
+            title = f"{day.strftime("%Y-%m-%d")} {time.strftime("%H")}:00～ {buttle} {rule}"
+            description = ""
+            elapsed_time = 0
+            for file in files:
+                description += f"{timedelta_to_mmss(datetime.timedelta(seconds=elapsed_time))} {file.result}\n"
+                elapsed_time += file.length
+
+            # ファイルアップロード
+            print(f"YouTubeにアップロードします")
+            res = self._youtube.upload(path, title, description)
+            if res:
+                print(f"YouTubeにアップロードしました: {path}")
+                os.remove(path)
+                for file in files:
+                    os.remove(file.path)
+            else:
+                print(f"YouTubeへのアップロードに失敗しました: {path}")
 
     def run(self):
         self._status = RecordStatus.OFF
@@ -107,10 +217,10 @@ class SplatReplay:
         except KeyboardInterrupt:
             print("監視を終了します")
         finally:
-            self._keep_running = False
-            self._uploader_thread.join()
             self._capture.release()
             cv2.destroyAllWindows()
+            if self._uploader_thread:
+                self._uploader_thread.join()
 
     def _is_screen_off(self, image: np.ndarray) -> bool:
         if image.max() <= 10:
@@ -198,18 +308,12 @@ class SplatReplay:
                 print(f"ルール: {rule_name}")
                 break
 
-        day_names = ["月", "火", "水", "木", "金", "土", "日"]
-        now = datetime.datetime.now()
-        day = now.strftime(f"%Y.%m.%d({day_names[now.weekday()]}) %H%M")
-
-        # リネーム
-        directory = os.path.dirname(path)
-        file_name = f"{day} {buttle} {rule} {self._buttle_result}"
-        extension = os.path.splitext(path)[1]
-        new_path = f"{directory}/{file_name}{extension}"
+        # ファイルリネーム＆移動
+        # スケジュールの分類をできるよう、録画開始日時(バトル開始日時)をファイル名に含める
+        file_base_name, extension = os.path.splitext(os.path.basename(path))
+        start_datetime = datetime.datetime.strptime(file_base_name, "%Y-%m-%d %H-%M-%S")
+        directory = os.path.dirname(__file__)
+        new_file_base_name = f"{start_datetime.strftime('%Y-%m-%d %H-%M-%S')}_{buttle}_{rule}_{self._buttle_result}{extension}"
+        new_path = os.path.join(directory, "out", new_file_base_name)
         os.rename(path, new_path)
-        print(f"ファイル名を変更しました: {new_path}")
-        
-        if self._youtube:
-            self._upload_queue.put((self._youtube, new_path, file_name, f"{file_name}の試合をプレイしました"))
-            print("YouTubeにアップロードするタスクを追加しました")
+        print(f"ファイルを移動しました: {new_path}")

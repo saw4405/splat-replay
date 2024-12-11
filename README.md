@@ -9,7 +9,7 @@
 
 * バトルのプレイ動画を自動で録画する
   (改良することでバイトにも対応可能)
-* 録画した動画をYouTubeに自動でアップロードする
+* 録画した動画をYouTubeに指定した時刻にアップロードする
   * 環境変数(`UPLOAD_YOUTUBE`)でアップロードする/しないを設定可能
 
 ### 機能詳細
@@ -17,8 +17,9 @@
 * OBSを起動する
 * OBSの仮想カメラ機能を有効にする
 * バトル開始を検知し、録画を開始する
-* バトル終了を検知し、録画を停止して、YouTubeにアップロードする
+* バトル終了を検知し、録画を停止する
   * バトル終了時に勝敗・マッチ・ルールを自動判定し、動画のタイトルに設定する
+* 設定した時刻になったら、スケジュール(マッチ・ルール)毎にプレイ動画を結合し、YouTubeにアップロードする
 
 ## 使い方
 
@@ -27,6 +28,7 @@
 * Windows 11 23H2
 * OBS 30.2.3
 * Python 3.12.8
+* FFmpeg N-109468-gd39b34123d-20221230 
 
 ### 前提条件
 
@@ -37,6 +39,10 @@
 * Pythonをインストールしていること
 * YouTubeの認証情報を取得し、YouTubeAPIを有効化しておくこと [[参照]](https://qiita.com/ny7760/items/5a728fd9e7b40588237c)
     * 認証情報をjsonファイルとしてダウンロードしておく
+    * 15分以上の動画をアップロードできるよう、YouTubeアカウントの確認を実施しておく [[参照]](https://www.howtonote.jp/youtube/movie/index4.html#google_vignette)
+* FFmpegをインストールしていること [[参照]](https://taziku.co.jp/blog/windows-ffmpeg)
+    * パスを通しておくこと
+
 
 ### 初回手順
 
@@ -50,8 +56,6 @@
     pip install -r requirements.txt
     ```
 
-    * `python-dotenv`
-        * `.env`ファイルから環境変数を読み込むために使用
     * `opencv-python`
         * バトルの開始・終了等を検知するために使用
     * `obs-websocket-py`
@@ -60,14 +64,18 @@
         * OBSの起動有無を確認するために使用
     * `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`
         * YouTubeに動画をアップロードするために使用
+    * `python-dotenv`
+        * `.env`ファイルから環境変数を読み込むために使用
+    * `schedule`
+        * 動画のアップロードを定期的にバッチ処理するために使用
 
 4. `.example.env`を`.env`にリネームし、OBSのWebSocketのパスワード等を設定する
 
 5. `templates`フォルダに画像認識するためのテンプレート画像を保存する
-   
+   (`templates(sample)`フォルダ内の画像を参考にしてください)
+    
     1. OBSを起動した状態でバトルをする
     2. 判定に使用する画面のスクリーンショットをとる
-       (`templates(sample)`フォルダ内の画像を参考にしてください)
        - バトル開始時に敵・味方のプレートが表示されている画面
          - `start.png`
        - バトル終了時に勝敗判定をしている画面
