@@ -1,11 +1,12 @@
 import os
+import time
 import subprocess
 from typing import Optional, Tuple
 
 import psutil
 from obswebsocket import obsws, requests
 
-# https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md#getsourceactive
+# https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md
 
 class Obs:
 
@@ -24,6 +25,10 @@ class Obs:
         file = os.environ["OBS_FILE"]
         os.chdir(directory)
         self.__process = subprocess.Popen(file, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # 起動直後はWebSocket接続に失敗するので起動待ちする
+        while not self._is_running():
+            time.sleep(1)
+        time.sleep(5)
         print("OBSを起動しました")
 
     def _is_running(self) -> bool:
@@ -74,6 +79,12 @@ class Obs:
         return True
 
     def start_record(self) -> bool:
+
+        result = self.__ws.call(requests.GetRecordStatus())
+        status = result.datain.get("outputActive", False)
+        if status:
+            return True
+        
         result = self.__ws.call(requests.StartRecord())
         
         if not result.status:
