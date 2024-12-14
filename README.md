@@ -25,20 +25,20 @@
 * Windows 11 23H2
 * OBS 30.2.3
 * Python 3.12.8
-* FFmpeg N-109468-gd39b34123d-20221230 
+* FFmpeg N-109468-gd39b34123d-20221230
 
 ### 前提条件
 
 * OBS(28.0.0以降)をインストールしていること
-    * OBSのソースを設定しておくこと [[参考]](https://dc.wondershare.jp/recorder-review/how-to-use-obs-and-capture-board.html)
-    * OBSのWebSocket機能を有効にしていること　[[参考]](https://note.com/213414/n/nd9981ad5bb19)
-    * 必要に応じてOBSの録画設定をしておくこと [[参考]](https://obsproject.com/kb/standard-recording-output-guide)
+  * OBSのソースを設定しておくこと [[参考]](https://dc.wondershare.jp/recorder-review/how-to-use-obs-and-capture-board.html)
+  * OBSのWebSocket機能を有効にしていること [[参考]](https://note.com/213414/n/nd9981ad5bb19)
+  * 必要に応じてOBSの録画設定をしておくこと [[参考]](https://obsproject.com/kb/standard-recording-output-guide)
 * Pythonをインストールしていること
 * YouTubeの認証情報を取得し、YouTubeAPIを有効化しておくこと [[参照]](https://qiita.com/ny7760/items/5a728fd9e7b40588237c)
-    * 認証情報をjsonファイルとしてダウンロードしておく
-    * 15分以上の動画をアップロードできるよう、YouTubeアカウントの確認を実施しておく [[参照]](https://www.howtonote.jp/youtube/movie/index4.html#google_vignette)
+  * 認証情報をjsonファイルとしてダウンロードしておく
+  * 15分以上の動画をアップロードできるよう、YouTubeアカウントの確認を実施しておく [[参照]](https://www.howtonote.jp/youtube/movie/index4.html#google_vignette)
 * FFmpegをインストールしていること [[参照]](https://taziku.co.jp/blog/windows-ffmpeg)
-    * パスを通しておくこと
+  * パスを通しておくこと
 
 ### 初回手順
 
@@ -69,15 +69,15 @@
 
 5. `templates`フォルダに画像認識するためのテンプレート画像を保存する
    (`templates(sample)`フォルダ内の画像を参考にしてください)
-   
+  
     1. OBSを起動した状態でバトルをする
     2. 判定に使用する画面のスクリーンショットをとる
-       - バトル開始時に敵・味方のプレートが表示されている画面
-         - `start.png`
-       - バトル終了時に勝敗判定をしている画面
-         - `win.png`、`lose.png`
-       - バトル終了後に自分のキルレや表彰が表示されている画面
-         - `stop.png`、`regular.png`、`bankara_challenge.png`、`bankara_open.png`、`x.png`、`nawabari.png`、`area.png`、`asari.png`、`hoko.png`、`yagura.png`
+       * バトル開始時に敵・味方のプレートが表示されている画面
+         * `start.png`
+       * バトル終了時に勝敗判定をしている画面
+         * `win.png`、`lose.png`
+       * バトル終了後に自分のキルレや表彰が表示されている画面
+         * `stop.png`、`regular.png`、`bankara_challenge.png`、`bankara_open.png`、`x.png`、`nawabari.png`、`area.png`、`asari.png`、`hoko.png`、`yagura.png`
     3. トリミングする
 
 ### 録画手順
