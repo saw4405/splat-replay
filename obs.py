@@ -9,68 +9,55 @@ from obswebsocket import obsws, requests
 # https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md
 
 class Obs:
-
     def __init__(self):
-        self.__process = None
+        self.DIRECTORY = os.environ["OBS_DIRECTORY"]
+        self.FILE = os.environ["OBS_FILE"]
+        self.HOST = os.environ["OBS_WS_HOST"]
+        self.PORT = os.environ["OBS_WS_PORT"]
+        self.PASSWORD = os.environ["OBS_WS_PASSWORD"]
 
-        self._start()
-        self.__ws = self._connect()
+        self._process = self._start_process()
+        
+        self._ws = obsws(self.HOST, self.PORT, self.PASSWORD)
+        self._ws.connect()
+        print("OBS WebSocketに接続しました")
 
-    def _start(self):
+    def _start_process(self) -> Optional[subprocess.Popen]:
         if self._is_running():
             print("OBSは既に起動しています")
-            return
+            return None
         
-        directory = os.environ["OBS_DIRECTORY"]
-        file = os.environ["OBS_FILE"]
-        os.chdir(directory)
-        self.__process = subprocess.Popen(file, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        os.chdir(self.DIRECTORY)
+        process = subprocess.Popen(self.FILE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print("OBSを起動しました")
+
         # 起動直後はWebSocket接続に失敗するので起動待ちする
         while not self._is_running():
             time.sleep(1)
         time.sleep(5)
-        print("OBSを起動しました")
+        return process
 
     def _is_running(self) -> bool:
-        """OBSが既に起動しているか確認する"""
-        file = os.environ["OBS_FILE"]
-
         for proc in psutil.process_iter(['name']):
-            if proc.info['name'] == file:
+            if proc.info['name'] == self.FILE:
                 return True
         return False
-            
-    def _connect(self) -> obsws:
-        host = os.environ["OBS_WS_HOST"]
-        port = os.environ["OBS_WS_PORT"]
-        password = os.environ["OBS_WS_PASSWORD"]
-        ws = obsws(host, port, password)
-        ws.connect()
-        print("OBS WebSocketに接続しました")
-        return ws
 
     def __del__(self):
-        self._disconnect()
-        self._end()
-
-    def _end(self):
-        if not self.__process:
-            return
-        self.__process.terminate()
-        print("OBSを終了しました")
-
-    def _disconnect(self):
-        self.__ws.disconnect()
+        self._ws.disconnect()
+        if self._process:
+            self._process.terminate()
+            print("OBSを終了しました")
 
     def start_virtual_cam(self) -> bool:
 
-        result = self.__ws.call(requests.GetVirtualCamStatus())
+        result = self._ws.call(requests.GetVirtualCamStatus())
         status = result.datain.get("outputActive", False)
         if status:
+            print("仮想カメラは既に起動しています")
             return True
         
-        result = self.__ws.call(requests.StartVirtualCam())
-
+        result = self._ws.call(requests.StartVirtualCam())
         if not result.status:
             print("仮想カメラの起動に失敗しました")
             return False
@@ -80,13 +67,13 @@ class Obs:
 
     def start_record(self) -> bool:
 
-        result = self.__ws.call(requests.GetRecordStatus())
+        result = self._ws.call(requests.GetRecordStatus())
         status = result.datain.get("outputActive", False)
         if status:
+            print("録画は既に開始しています")
             return True
         
-        result = self.__ws.call(requests.StartRecord())
-        
+        result = self._ws.call(requests.StartRecord())
         if not result.status:
             print("録画の開始に失敗しました")
             return False
@@ -95,8 +82,8 @@ class Obs:
         return True
 
     def stop_record(self) -> Tuple[bool, Optional[str]]:
-        result = self.__ws.call(requests.StopRecord())
 
+        result = self._ws.call(requests.StopRecord())
         if not result.status:
             print("録画の停止に失敗しました")
             return False, None

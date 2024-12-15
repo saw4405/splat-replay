@@ -1,5 +1,6 @@
 import os
 import pickle
+from typing import Optional, Union, Literal
 
 import google.auth
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -7,52 +8,56 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 import google.auth.exceptions
+import google.auth.external_account_authorized_user
+import google.oauth2.credentials
 
+Credentials = Union[google.auth.external_account_authorized_user.Credentials, google.oauth2.credentials.Credentials]
+PrivacyStatus = Literal['public', 'private', 'unlisted']
 
 class Youtube:
+    TOKEN_FILE = 'token.pickle'
+    CLIENT_SECRET_FILE = 'client_secrets.json'
+    API_NAME = 'youtube'
+    API_VERSION = 'v3'
+    SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
 
     def __init__(self):
-        self._instance = self._authenticate()
+        credentials = self._get_credentials()
+        self._youtube = build(self.API_NAME, self.API_VERSION, credentials=credentials)
         
-    def _authenticate(self):
-        TOKEN_FILE = 'token.pickle'
-        CLIENT_SECRET_FILE = 'client_secrets.json'
-        API_NAME = 'youtube'
-        API_VERSION = 'v3'
-        SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
-
-        credentials = None
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, 'rb') as token_file:
+    def _get_credentials(self) -> Credentials:
+        credentials: Optional[Credentials] = None
+        if os.path.exists(self.TOKEN_FILE):
+            with open(self.TOKEN_FILE, 'rb') as token_file:
                 credentials = pickle.load(token_file)
 
-        if credentials:
-            if credentials.expired and credentials.refresh_token:
-                credentials.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CLIENT_SECRET_FILE, SCOPES)
-            credentials = flow.run_local_server(port=8080)
-            with open(TOKEN_FILE, 'wb') as token_file:
-                pickle.dump(credentials, token_file)
+            try:
+                if credentials.expired and credentials.refresh_token:
+                    credentials.refresh(Request())
+                return credentials
+            except:
+                pass
         
-        youtube = build(API_NAME, API_VERSION, credentials=credentials)
-        return youtube
+        flow = InstalledAppFlow.from_client_secrets_file(
+            self.CLIENT_SECRET_FILE, self.SCOPES)
+        credentials = flow.run_local_server(port=8080)
+        with open(self.TOKEN_FILE, 'wb') as token_file:
+            pickle.dump(credentials, token_file)
+        return credentials
 
-    def upload(self, path: str, title: str, description: str, category: str = '22', privacy_status: str = 'private') -> bool:
+    def upload(self, path: str, title: str, description: str, category: int = 20, privacy_status: PrivacyStatus = 'private') -> bool:
         try:
             # Specify the file to upload
             media_file = MediaFileUpload(path, mimetype='video/*', resumable=True)
             
             # Call the API's videos.insert method to upload the video
-            request = self._instance.videos().insert(
+            request = self._youtube.videos().insert(
                 part="snippet,status",
                 body={
                     'snippet': {
                         'title': title,
                         'description': description,
-                        'tags': ['example', 'video', 'upload'],
-                        'categoryId': category  # 22 for People & Blogs
+                        'categoryId': category  # 20 for Gaming
                     },
                     'status': {
                         'privacyStatus': privacy_status  # 'public', 'private', or 'unlisted'

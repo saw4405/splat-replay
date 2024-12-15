@@ -13,20 +13,17 @@ class TemplateMatcher:
         :param mask_path: マスク画像のパス（オプション）。
         :param threshold: 一致とみなすスコアの閾値（0.0〜1.0）。
         """
-        # self.template: np.ndarray = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
-        self.template: np.ndarray = cv2.imread(template_path)
-        if self.template is None:
+        self._template = cv2.imread(template_path)
+        if self._template is None:
             raise ValueError(f"Failed to load template image: {template_path}")
         
-        self.mask: Optional[np.ndarray] = (
-            cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE) if mask_path else None
-        )
-        if mask_path and self.mask is None:
+        self._mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE) if mask_path else None
+        if mask_path and self._mask is None:
             raise ValueError(f"Failed to load mask image: {mask_path}")
 
-        self.threshold: float = threshold
+        self._threshold = threshold
         
-        self.template_height, self.template_width = self.template.shape[:2]
+        self.height, self.width = self._template.shape[:2]
 
     def match(self, frame: np.ndarray) -> Tuple[bool, Optional[Tuple[int, int]]]:
         """
@@ -38,22 +35,18 @@ class TemplateMatcher:
         if not isinstance(frame, np.ndarray):
             raise TypeError("Frame must be a numpy ndarray.")
 
-        # フレームをグレースケールに変換
-        # gray_frame: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray_frame = frame
-
         # テンプレートマッチングを実行
-        if self.mask is not None:
+        if self._mask is not None:
             result: np.ndarray = cv2.matchTemplate(
-                gray_frame, self.template, cv2.TM_CCOEFF_NORMED, mask=self.mask
+                frame, self._template, cv2.TM_CCOEFF_NORMED, mask=self._mask
             )
         else:
             result: np.ndarray = cv2.matchTemplate(
-                gray_frame, self.template, cv2.TM_CCOEFF_NORMED
+                frame, self._template, cv2.TM_CCOEFF_NORMED
             )
 
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
         # 一致が閾値以上かどうかを判定
-        return max_val >= self.threshold, max_loc if max_val >= self.threshold else None
+        return max_val >= self._threshold, max_loc if max_val >= self._threshold else None
     

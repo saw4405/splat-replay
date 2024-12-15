@@ -4,8 +4,8 @@ import glob
 import time
 import datetime
 from collections import defaultdict
-import threading
-from typing import Dict, List
+import subprocess
+from typing import Dict, List, Tuple
 from dataclasses import dataclass
 
 import cv2
@@ -23,36 +23,11 @@ class UploadFile:
     result: str
     length: float
 
-class Uploader:
-    OUT_DIR = "out"
-    UPLOAD_DIR = "upload"
+class FileProcessor:
+    @staticmethod
+    def get_upload_files(directory: str) -> List['UploadFile']:
+        upload_files: List[UploadFile] = []
 
-    @classmethod
-    def queue(cls, path: str, start_datetime: datetime.datetime, buttle: str, rule: str, result: str):
-        _, extension = os.path.splitext(os.path.basename(path))
-        # スケジュール毎に結合できるよう、録画開始日時(バトル開始日時)、マッチ、ルールをファイル名に含める
-        # 動画説明に各試合の結果を記載するため、結果もファイル名に含める
-        new_file_base_name = f"{start_datetime.strftime('%Y-%m-%d %H-%M-%S')}_{buttle}_{rule}_{result}{extension}"
-        directory = os.path.dirname(__file__)
-        new_path = os.path.join(directory, Uploader.OUT_DIR, new_file_base_name)
-        os.rename(path, new_path)
-
-    def __init__(self):
-        self._youtube = Youtube()
-        upload_time = os.environ["UPLOAD_TIME"]
-        schedule.every().day.at(upload_time).do(self._upload_daily)
-        print(f"アップロードスケジュールを設定しました: {upload_time}")
-
-    def run(self):
-        print("アップロード処理の待機中です")
-        while True:
-            schedule.run_pending()
-            time.sleep(360)
-    
-    def _get_upload_files(self) -> List[UploadFile]:
-        update_files: List[UploadFile] = []
-
-        directory = os.path.join(os.path.dirname(__file__), self.OUT_DIR)
         files = glob.glob(f'{directory}/*.*')
         for path in files:
             file = os.path.basename(path)
@@ -61,25 +36,12 @@ class Uploader:
             video = cv2.VideoCapture(path)
             length = video.get(cv2.CAP_PROP_FRAME_COUNT) / video.get(cv2.CAP_PROP_FPS)
             video.release()
-            update_files.append(UploadFile(file, path, start_datetime, buttle, rule, result, length))
+            upload_files.append(UploadFile(file, path, start_datetime, buttle, rule, result, length))
 
-        return update_files
+        return upload_files
         
-    def _split_by_time_ranges(self, upload_files: List[UploadFile]) -> Dict[int, List[UploadFile]]:
-        time_ranges = [
-            (datetime.time(1, 0), datetime.time(3, 0)),
-            (datetime.time(3, 0), datetime.time(5, 0)),
-            (datetime.time(5, 0), datetime.time(7, 0)),
-            (datetime.time(7, 0), datetime.time(9, 0)),
-            (datetime.time(9, 0), datetime.time(11, 0)),
-            (datetime.time(11, 0), datetime.time(13, 0)),
-            (datetime.time(13, 0), datetime.time(15, 0)),
-            (datetime.time(15, 0), datetime.time(17, 0)),
-            (datetime.time(17, 0), datetime.time(19, 0)),
-            (datetime.time(19, 0), datetime.time(21, 0)),
-            (datetime.time(21, 0), datetime.time(23, 0)),
-            (datetime.time(23, 0), datetime.time(1, 0))  # 日をまたぐ時間帯
-        ]
+    @staticmethod
+    def split_by_time_ranges(upload_files: List['UploadFile'], time_ranges: List[tuple]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List['UploadFile']]:
         # 時間帯ごとのリストを格納する辞書
         buckets = defaultdict(list)
 
@@ -87,39 +49,30 @@ class Uploader:
             file_datetime = upload_file.start_datetime
             file_date = file_datetime.date()
             file_time = file_datetime.time()
-            buttle = upload_file.buttle
-            rule = upload_file.rule
             
             for _, (start, end) in enumerate(time_ranges):
                 if start < end:  # 通常の時間帯
                     if start <= file_time < end:
-                        bucket_key = (file_date, start, buttle, rule)
+                        bucket_key = (file_date, start, upload_file.buttle, upload_file.rule)
                         buckets[bucket_key].append(upload_file)
                         break
                 else:  # 日をまたぐ時間帯 (23:00-1:00)
                     if file_time >= start or file_time < end:
                         # 日をまたぐ場合は1:00を含む日付に調整
                         adjusted_date = file_date if file_time >= start else file_date - datetime.timedelta(days=1)
-                        bucket_key = (adjusted_date, start, buttle, rule)
+                        bucket_key = (adjusted_date, start, upload_file.buttle, upload_file.rule)
                         buckets[bucket_key].append(upload_file)
                         break
         return buckets
-
-    def _timedelta_to_str(self, delta: datetime.timedelta) -> str:
-        total_seconds = int(delta.total_seconds())
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        formatted_time = f"{hours:02}:{minutes:02}:{seconds:02}"
-        return formatted_time
     
-    def _concat(self, files: List[UploadFile], out_path: str):
-            
+    @staticmethod
+    def concat(files: List['UploadFile'], out_path: str):
         if len(files) == 1:
             shutil.copyfile(files[0].file_name, out_path)
             return
 
         directory = os.path.dirname(files[0].path)
-        _, extention = os.path.splitext(files[0].file_name)
+        _, extension = os.path.splitext(files[0].file_name)
 
         concat_list = "list.txt"
         concat_list_path = os.path.join(directory, concat_list)
@@ -128,32 +81,82 @@ class Uploader:
                 f.writelines([f"file '{os.path.basename(file.file_name)}'\n" for file in files])
 
             os.chdir(directory)
-            command = f"ffmpeg -f concat -safe 0 -i {concat_list} -c copy temp{extention}"
-            os.system(command)
-            os.rename(f"temp{extention}", out_path)
+            command = [
+                "ffmpeg",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concat_list,
+                "-c", "copy",
+                f"temp{extension}"
+            ]
+            subprocess.run(command, check=True)
+            os.rename(f"temp{extension}", out_path)
 
         finally:
             os.remove(concat_list_path)
 
-    def _upload_daily(self):
+class Uploader:
+    RECORDED_DIR = os.path.join(os.path.dirname(__file__), "recorded_videos")
+    PENDING_DIR = os.path.join(os.path.dirname(__file__), "upload_pending_videos")
+    TIME_RANGES = [
+        (datetime.time(1, 0), datetime.time(3, 0)),
+        (datetime.time(3, 0), datetime.time(5, 0)),
+        (datetime.time(5, 0), datetime.time(7, 0)),
+        (datetime.time(7, 0), datetime.time(9, 0)),
+        (datetime.time(9, 0), datetime.time(11, 0)),
+        (datetime.time(11, 0), datetime.time(13, 0)),
+        (datetime.time(13, 0), datetime.time(15, 0)),
+        (datetime.time(15, 0), datetime.time(17, 0)),
+        (datetime.time(17, 0), datetime.time(19, 0)),
+        (datetime.time(19, 0), datetime.time(21, 0)),
+        (datetime.time(21, 0), datetime.time(23, 0)),
+        (datetime.time(23, 0), datetime.time(1, 0))  # 日をまたぐ時間帯
+    ]
+    
+    @staticmethod
+    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, result: str):
+        _, extension = os.path.splitext(os.path.basename(path))
+        # スケジュール毎に結合できるよう、録画開始日時(バトル開始日時)、マッチ、ルールをファイル名に含める
+        # 動画説明に各試合の結果を記載するため、結果もファイル名に含める
+        new_file_base_name = f"{start_datetime.strftime('%Y-%m-%d %H-%M-%S')}_{match}_{rule}_{result}{extension}"
+        new_path = os.path.join(Uploader.RECORDED_DIR, new_file_base_name)
+        os.rename(path, new_path)
+
+    def __init__(self):
+        os.makedirs(self.RECORDED_DIR, exist_ok=True)
+        os.makedirs(self.PENDING_DIR, exist_ok=True)
+
+        self._youtube = Youtube()
+    
+    def set_upload_schedule(self, upload_time: str):
+        schedule.every().day.at(upload_time).do(self.start_upload)
+        print(f"アップロードスケジュールを設定しました: {upload_time}")
+
+    def run(self):
+        print("アップロード処理の待機中です")
+        while True:
+            schedule.run_pending()
+            time.sleep(360)
+
+    def _timedelta_to_str(self, delta: datetime.timedelta) -> str:
+        total_seconds = int(delta.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        formatted_time = f"{hours:02}:{minutes:02}:{seconds:02}"
+        return formatted_time
+
+    def start_upload(self):
         print("アップロード処理を開始します")
 
-        directory = os.path.join(os.path.dirname(__file__), self.OUT_DIR, self.UPLOAD_DIR)
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+        upload_files = FileProcessor.get_upload_files(self.RECORDED_DIR)
+        buckets = FileProcessor.split_by_time_ranges(upload_files, self.TIME_RANGES)
+        for key, files in buckets.items():   
+            day, time, buttle, rule = key
+            extension = os.path.splitext(files[0].file_name)[1]
+            file_name = f"{day.strftime("%Y-%m-%d")}_{time.strftime("%H")}_{buttle}_{rule}{extension}"
+            path = os.path.join(self.PENDING_DIR, file_name)
 
-        update_files = self._get_upload_files()
-        buckets = self._split_by_time_ranges(update_files)
-        for key, files in buckets.items():        
-            day: datetime.date = key[0]
-            time: datetime.time = key[1]
-            buttle: str = key[2]
-            rule: str = key[3]
-            extention = os.path.splitext(files[0].file_name)[1]
-            file_name = f"{day.strftime("%Y-%m-%d")}_{time.strftime("%H")}_{buttle}_{rule}{extention}"
-            path = os.path.join(directory, file_name)
-
-            self._concat(files, path)
+            FileProcessor.concat(files, path)
 
             title = f"{day.strftime("%Y-%m-%d")} {time.strftime("%H")}:00～ {buttle} {rule}"
             description = ""
@@ -173,3 +176,8 @@ class Uploader:
                     os.remove(file.path)
             else:
                 print("YouTubeへのアップロードに失敗しました")
+
+        shutdoen_after_upload = bool(os.environ["SHUTDOWN_AFTER_UPLOAD"])
+        if shutdoen_after_upload:
+            print("アップロード処理が完了したため、PCをシャットダウンします")
+            os.system("shutdown -s -t 0")
