@@ -152,22 +152,29 @@ class Uploader:
         buckets = FileProcessor.split_by_time_ranges(upload_files, self.TIME_RANGES)
         for key, files in buckets.items():   
             day, time, buttle, rule = key
-            extension = os.path.splitext(files[0].file_name)[1]
-            file_name = f"{day.strftime("%Y-%m-%d")}_{time.strftime("%H")}_{buttle}_{rule}{extension}"
-            path = os.path.join(self.PENDING_DIR, file_name)
 
-            FileProcessor.concat(files, path)
-
-            title = f"{day.strftime("%Y-%m-%d")} {time.strftime("%H")}:00～ {buttle} {rule}"
             description = ""
             elapsed_time = 0
+            win_count = 0
+            lose_count = 0
             for file in files:
                 elapsed_time_str = self._timedelta_to_str(datetime.timedelta(seconds=elapsed_time))
                 description += f"{elapsed_time_str} {file.result}\n"
                 elapsed_time += file.length
+                if "WIN" in file.result:
+                    win_count += 1
+                elif "LOSE" in file.result:
+                    lose_count += 1
+
+            # ファイル結合
+            extension = os.path.splitext(files[0].file_name)[1]
+            file_name = f"{day.strftime("%Y-%m-%d")}_{time.strftime("%H")}_{buttle}_{rule}_{win_count}wins{lose_count}losses{extension}"
+            path = os.path.join(self.PENDING_DIR, file_name)
+            FileProcessor.concat(files, path)
 
             # ファイルアップロード
-            print(f"YouTubeにアップロードします: {file_name}")
+            title = f"{day.strftime("%Y-%m-%d")} {time.strftime("%H")}:00～ {buttle} {rule} {win_count}勝{lose_count}敗"
+            print(f"YouTubeにアップロードします: {title}")
             res = self._youtube.upload(path, title, description)
             if res:
                 print("YouTubeにアップロードしました")
