@@ -96,8 +96,8 @@ class FileProcessor:
             os.remove(concat_list_path)
 
 class Uploader:
-    RECORDED_DIR = os.path.join(os.path.dirname(__file__), "recorded_videos")
-    PENDING_DIR = os.path.join(os.path.dirname(__file__), "upload_pending_videos")
+    RECORDED_DIR = os.path.join(os.path.dirname(__file__), "videos", "recorded")
+    PENDING_DIR = os.path.join(os.path.dirname(__file__), "videos", "upload_pending")
     TIME_RANGES = [
         (datetime.time(1, 0), datetime.time(3, 0)),
         (datetime.time(3, 0), datetime.time(5, 0)),
