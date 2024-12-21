@@ -25,15 +25,24 @@ class Youtube:
         credentials = self._get_credentials()
         self._youtube = build(self.API_NAME, self.API_VERSION, credentials=credentials)
         
-    def _get_credentials(self) -> Credentials:
-        credentials: Optional[Credentials] = None
-        if os.path.exists(self.TOKEN_FILE):
-            with open(self.TOKEN_FILE, 'rb') as token_file:
-                credentials = pickle.load(token_file)
+    def _load_credentials(self) -> Optional[Credentials]:
+        if not os.path.exists(self.TOKEN_FILE):
+            return None
+        
+        with open(self.TOKEN_FILE, 'rb') as token_file:
+            return pickle.load(token_file)
+    
+    def _save_credentials(self, credentials: Credentials):
+        with open(self.TOKEN_FILE, 'wb') as token_file:
+            pickle.dump(credentials, token_file)
 
+    def _get_credentials(self) -> Credentials:
+        credentials = self._load_credentials()
+        if credentials:
             try:
                 if credentials.expired and credentials.refresh_token:
                     credentials.refresh(Request())
+                    self._save_credentials(credentials)
                 return credentials
             except:
                 pass
@@ -41,11 +50,11 @@ class Youtube:
         flow = InstalledAppFlow.from_client_secrets_file(
             self.CLIENT_SECRET_FILE, self.SCOPES)
         credentials = flow.run_local_server(port=8080)
-        with open(self.TOKEN_FILE, 'wb') as token_file:
-            pickle.dump(credentials, token_file)
+        self._save_credentials(credentials)
         return credentials
 
     def upload(self, path: str, title: str, description: str, category: int = 20, privacy_status: PrivacyStatus = 'private') -> bool:
+        media_file = None
         try:
             # Specify the file to upload
             media_file = MediaFileUpload(path, mimetype='video/*', resumable=True)
@@ -78,3 +87,6 @@ class Youtube:
         except Exception as e:
             print(f"An error occurred: {e}")
             return False
+        finally:
+            if media_file:
+                del media_file
