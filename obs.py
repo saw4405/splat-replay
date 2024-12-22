@@ -1,10 +1,13 @@
 import os
+import logging
 import time
 import subprocess
 from typing import Optional, Tuple
 
 import psutil
 from obswebsocket import obsws, requests
+
+logger = logging.getLogger(__name__)
 
 # https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md
 
@@ -20,16 +23,16 @@ class Obs:
         
         self._ws = obsws(self.HOST, self.PORT, self.PASSWORD)
         self._ws.connect()
-        print("OBS WebSocketに接続しました")
+        logger.info("OBS WebSocketに接続しました")
 
     def _start_process(self) -> Optional[subprocess.Popen]:
         if self._is_running():
-            print("OBSは既に起動しています")
+            logger.info("OBSは既に起動しています")
             return None
         
         os.chdir(self.DIRECTORY)
         process = subprocess.Popen(self.FILE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        print("OBSを起動しました")
+        logger.info("OBSを起動しました")
 
         # 起動直後はWebSocket接続に失敗するので起動待ちする
         while not self._is_running():
@@ -47,22 +50,22 @@ class Obs:
         self._ws.disconnect()
         if self._process:
             self._process.terminate()
-            print("OBSを終了しました")
+            logger.info("OBSを終了しました")
 
     def start_virtual_cam(self) -> bool:
 
         result = self._ws.call(requests.GetVirtualCamStatus())
         status = result.datain.get("outputActive", False)
         if status:
-            print("仮想カメラは既に起動しています")
+            logger.info("仮想カメラは既に起動しています")
             return True
         
         result = self._ws.call(requests.StartVirtualCam())
         if not result.status:
-            print("仮想カメラの起動に失敗しました")
+            logger.info("仮想カメラの起動に失敗しました")
             return False
         
-        print("仮想カメラを開始しました")
+        logger.info("仮想カメラを開始しました")
         return True
 
     def start_record(self) -> bool:
@@ -70,28 +73,28 @@ class Obs:
         result = self._ws.call(requests.GetRecordStatus())
         status = result.datain.get("outputActive", False)
         if status:
-            print("録画は既に開始しています")
+            logger.info("録画は既に開始しています")
             return True
         
         result = self._ws.call(requests.StartRecord())
         if not result.status:
-            print("録画の開始に失敗しました")
+            logger.info("録画の開始に失敗しました")
             return False
         
-        print("録画を開始しました")
+        logger.info("録画を開始しました")
         return True
 
     def stop_record(self) -> Tuple[bool, Optional[str]]:
 
         result = self._ws.call(requests.StopRecord())
         if not result.status:
-            print("録画の停止に失敗しました")
+            logger.info("録画の停止に失敗しました")
             return False, None
         
         output = result.datain.get("outputPath", None)
         if not output:
-            print("録画ファイルが見つかりません")
+            logger.info("録画ファイルが見つかりません")
             return False, None
         
-        print("録画を停止しました")
+        logger.info("録画を停止しました")
         return True, output

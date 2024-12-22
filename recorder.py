@@ -1,4 +1,5 @@
 import os
+import logging
 import time
 import datetime
 from typing import Dict, Callable, Optional
@@ -10,6 +11,8 @@ import numpy as np
 from obs import Obs
 from template_matcher import TemplateMatcher
 from uploader import Uploader
+
+logger = logging.getLogger(__name__)
 
 class RecordStatus(Enum):
     OFF = 1
@@ -138,7 +141,7 @@ class Recorder:
                         status = self._handle_record_status(frame)
 
         except KeyboardInterrupt:
-            print("監視を終了します")
+            logger.info("監視を終了します")
 
         finally:
             self._capture.release()
@@ -149,7 +152,7 @@ class Recorder:
             time.sleep(60)
             return RecordStatus.OFF
         
-        print("Switchが起動しました")
+        logger.info("Switchが起動しました")
         return RecordStatus.WAIT
 
     def _check_power_off(self, frame: np.ndarray) -> Optional[RecordStatus]:
@@ -161,7 +164,7 @@ class Recorder:
         if not self._analyzer.screen_off(frame):
             return None
         
-        print("Switchが電源OFFされました")
+        logger.info("Switchが電源OFFされました")
         if self._power_off_callback:
             self._power_off_callback()
         return RecordStatus.OFF
@@ -177,7 +180,7 @@ class Recorder:
     def _handle_record_status(self, frame: np.ndarray) -> RecordStatus:
         # 万一、バトル終了を画像検知できなかったときのため、10分でタイムアウトさせる
         if time.time() - self._record_start_time > 600:
-            print("録画がタイムアウトしたため、録画を停止します")
+            logger.info("録画がタイムアウトしたため、録画を停止します")
             self._stop_record(frame)
             return RecordStatus.WAIT
         
@@ -185,7 +188,7 @@ class Recorder:
         if self._buttle_result == "":
             self._buttle_result = self._analyzer.buttle_result(frame)
             if self._buttle_result != "":
-                print(f"バトル結果: {self._buttle_result}")
+                logger.info(f"バトル結果: {self._buttle_result}")
             return RecordStatus.RECORD
         
         # 処理負荷を下げるため、勝敗が決まってから録画停止タイミングを監視する
@@ -197,26 +200,26 @@ class Recorder:
         return RecordStatus.RECORD
     
     def _start_record(self):
-        print("録画を開始します")
+        logger.info("録画を開始します")
         self._obs.start_record()
         self._record_start_time = time.time()
         self._buttle_result = ""
 
     def _stop_record(self, frame: np.ndarray):
-        print("録画を停止します")
+        logger.info("録画を停止します")
         _, path = self._obs.stop_record()
 
         # マッチ・ルールを分析する
         match = self._analyzer.match_name(frame)
-        print(f"マッチ: {match}")
+        logger.info(f"マッチ: {match}")
         rule = self._analyzer.rule_name(frame)
-        print(f"ルール: {rule}")
+        logger.info(f"ルール: {rule}")
 
         # アップロードキューに追加
         file_base_name, _ = os.path.splitext(os.path.basename(path))
         start_datetime = datetime.datetime.strptime(file_base_name, "%Y-%m-%d %H-%M-%S")
         Uploader.queue(path, start_datetime, match, rule, self._buttle_result)
-        print("アップロードキューに追加しました")
+        logger.info("アップロードキューに追加しました")
 
         if match == "" or rule == "":
-            print("マッチ・ルールの判定に失敗しました")
+            logger.info("マッチ・ルールの判定に失敗しました")

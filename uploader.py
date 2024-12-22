@@ -1,4 +1,5 @@
 import os
+import logging
 import shutil
 import glob
 import time
@@ -12,6 +13,8 @@ import cv2
 import schedule
 
 from youtube import Youtube
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class UploadFile:
@@ -130,10 +133,10 @@ class Uploader:
     
     def set_upload_schedule(self, upload_time: str):
         schedule.every().day.at(upload_time).do(self.start_upload)
-        print(f"アップロードスケジュールを設定しました: {upload_time}")
+        logger.info(f"アップロードスケジュールを設定しました: {upload_time}")
 
     def run(self):
-        print("アップロード処理の待機中です")
+        logger.info("アップロード処理の待機中です")
         while True:
             schedule.run_pending()
             time.sleep(360)
@@ -146,7 +149,7 @@ class Uploader:
         return formatted_time
 
     def start_upload(self):
-        print("アップロード処理を開始します")
+        logger.info("アップロード処理を開始します")
 
         upload_files = FileProcessor.get_upload_files(self.RECORDED_DIR)
         buckets = FileProcessor.split_by_time_ranges(upload_files, self.TIME_RANGES)
@@ -174,17 +177,17 @@ class Uploader:
 
             # ファイルアップロード
             title = f"{day.strftime("%Y-%m-%d")} {time.strftime("%H")}:00～ {buttle} {rule} {win_count}勝{lose_count}敗"
-            print(f"YouTubeにアップロードします: {title}")
+            logger.info(f"YouTubeにアップロードします: {title}")
             res = self._youtube.upload(path, title, description)
             if res:
-                print("YouTubeにアップロードしました")
+                logger.info("YouTubeにアップロードしました")
                 os.remove(path)
                 for file in files:
                     os.remove(file.path)
             else:
-                print("YouTubeへのアップロードに失敗しました")
+                logger.info("YouTubeへのアップロードに失敗しました")
 
         shutdoen_after_upload = bool(os.environ["SHUTDOWN_AFTER_UPLOAD"])
         if shutdoen_after_upload:
-            print("アップロード処理が完了したため、PCをシャットダウンします")
+            logger.info("アップロード処理が完了したため、PCをシャットダウンします")
             os.system("shutdown -s -t 0")

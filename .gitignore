@@ -191,3 +191,4 @@ client_secrets.json
 templates/*
 token.pickle
 videos/*
+logs/*

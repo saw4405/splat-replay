@@ -1,4 +1,5 @@
 import os
+import logging
 import pickle
 from typing import Optional, Union, Literal
 
@@ -13,6 +14,8 @@ import google.oauth2.credentials
 
 Credentials = Union[google.auth.external_account_authorized_user.Credentials, google.oauth2.credentials.Credentials]
 PrivacyStatus = Literal['public', 'private', 'unlisted']
+
+logger = logging.getLogger(__name__)
 
 class Youtube:
     TOKEN_FILE = 'token.pickle'
@@ -78,14 +81,14 @@ class Youtube:
             # Upload the video
             response = request.execute()
             
-            print(f'Video "{title}" uploaded successfully!')
-            print(f'Video ID: {response["id"]}')
+            logger.info(f'Video "{title}" uploaded successfully!')
+            logger.info(f'Video ID: {response["id"]}')
             return True
         except google.auth.exceptions.GoogleAuthError as e:
-            print(f"Authentication failed: {e}")
+            logger.info(f"Authentication failed: {e}")
             return False
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logger.info(f"An error occurred: {e}")
             return False
         finally:
             if media_file:
