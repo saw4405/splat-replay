@@ -10,13 +10,14 @@
 * バトルのプレイ動画を自動で録画する (`recorder.py`)
   * OBSを起動する
   * OBSの仮想カメラ機能を有効にする
+  * Xマッチ選択時にXPを読み取る
   * バトル開始を検知し、録画を開始する
   * バトル終了を検知し、録画を停止する
   * バトル終了時に勝敗・マッチ・ルールを自動判定する
   
 * 録画した動画をYouTubeに指定した時刻にアップロードする (`uploader.py`)
   * 設定した時刻になったら、スケジュール・マッチ・ルール毎にプレイ動画を結合する
-  * スケジュール・マッチ・ルールをタイトルに、勝敗を説明に設定し、YouTubeにアップロードする
+  * スケジュール・マッチ・ルール・XPをタイトルに、勝敗・XPを説明に設定し、YouTubeにアップロードする
 
 ## 使い方
 
@@ -26,6 +27,7 @@
 * OBS 30.2.3
 * Python 3.12.8
 * FFmpeg N-109468-gd39b34123d-20221230
+* tesseract v5.5.0.20241111
 
 ### 前提条件
 
@@ -39,6 +41,8 @@
   * 15分以上の動画をアップロードできるよう、YouTubeアカウントの確認を実施しておく [[参照]](https://www.howtonote.jp/youtube/movie/index4.html#google_vignette)
 * FFmpegをインストールしていること [[参照]](https://taziku.co.jp/blog/windows-ffmpeg)
   * パスを通しておくこと
+* Tesseractをインストールしていること [[参照]](https://qiita.com/ku_a_i/items/93fdbd75edacb34ec610)
+  * best版の`eng.traineddata`をダウンロードしておくこと
 
 ### 初回手順
 
@@ -64,6 +68,8 @@
         * `.env`ファイルから環境変数を読み込むために使用
     * `schedule`
         * 動画のアップロードを定期的にバッチ処理するために使用
+    * `pytesseract`
+        * XPの読み込み等でOCRを使うために使用
 
 4. `.example.env`を`.env`にリネームし、OBSのWebSocketのパスワード等を設定する
 
@@ -72,6 +78,8 @@
   
     1. OBSを起動した状態でバトルをする
     2. 判定に使用する画面のスクリーンショットをとる
+       * Xマッチ選択時の画面
+         * `select_xmatch.png`、`xp_area1.png`、`xp_asari1.png`、`xp_hoko1.png`、`xp_yagura1.png`
        * バトル開始時に敵・味方のプレートが表示されている画面
          * `start.png`
        * バトル終了時に勝敗判定をしている画面
