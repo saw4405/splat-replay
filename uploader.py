@@ -4,9 +4,10 @@ import shutil
 import glob
 import time
 import datetime
+import threading
 from collections import defaultdict
 import subprocess
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Callable
 from dataclasses import dataclass
 
 import cv2
@@ -101,7 +102,10 @@ class FFmpeg:
             os.rename(f"temp{extension}", out_path)
 
         finally:
-            os.remove(concat_list_path)
+            try:
+                os.remove(concat_list_path)
+            except Exception as e:
+                logger.warning(f"一時ファイルの削除に失敗しました: {e}")
 
 
 class Uploader:
@@ -121,33 +125,38 @@ class Uploader:
         (datetime.time(17, 0), datetime.time(19, 0)),
         (datetime.time(19, 0), datetime.time(21, 0)),
         (datetime.time(21, 0), datetime.time(23, 0)),
-        (datetime.time(23, 0), datetime.time(1, 0))  # 日をまたぐ時間帯
+        (datetime.time(23, 0), datetime.time(1, 0))
     ]
 
     @staticmethod
     def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, result: str, xpower: Optional[float] = None):
-        _, extension = os.path.splitext(os.path.basename(path))
         new_file_base_name = UploadFile.make_file_base_name(
             start_datetime, match, rule, result, xpower)
+        _, extension = os.path.splitext(os.path.basename(path))
         new_path = os.path.join(Uploader.RECORDED_DIR,
                                 new_file_base_name + extension)
         os.rename(path, new_path)
 
-    def __init__(self):
+    def __init__(self, upload_complete_callback: Optional[Callable[[], None]] = None):
+        self._upload_complete_callback = upload_complete_callback
+
         os.makedirs(self.RECORDED_DIR, exist_ok=True)
         os.makedirs(self.PENDING_DIR, exist_ok=True)
 
         self._youtube = Youtube()
 
-    def set_upload_schedule(self, upload_time: str):
-        schedule.every().day.at(upload_time).do(self.start_upload)
+    def monitor_upload_schedule(self, upload_time: str):
+        schedule.every().day.at(upload_time).do(self.upload)
         logger.info(f"アップロードスケジュールを設定しました: {upload_time}")
 
-    def run(self):
-        logger.info("アップロード処理の待機中です")
-        while True:
-            schedule.run_pending()
-            time.sleep(360)
+        def run_upload_loop(self):
+            logger.info("アップロード処理の待機中です")
+            while True:
+                schedule.run_pending()
+                time.sleep(360)
+
+        thread = threading.Thread(target=run_upload_loop, daemon=True)
+        thread.start()
 
     def _timedelta_to_str(self, delta: datetime.timedelta) -> str:
         total_seconds = int(delta.total_seconds())
@@ -165,91 +174,117 @@ class Uploader:
         return upload_files
 
     def _split_by_time_ranges(self, upload_files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
-        # 時間帯ごとのリストを格納する辞書
-        buckets = defaultdict(list)
+        time_scheduled_files = defaultdict(list)
 
         for upload_file in upload_files:
             file_datetime = upload_file.start
             file_date = file_datetime.date()
             file_time = file_datetime.time()
 
-            for _, (start, end) in enumerate(self.TIME_RANGES):
-                if start < end:  # 通常の時間帯
-                    if start <= file_time < end:
-                        bucket_key = (file_date, start,
-                                      upload_file.battle, upload_file.rule)
-                        buckets[bucket_key].append(upload_file)
+            for _, (schedule_start_time, schedule_end_time) in enumerate(self.TIME_RANGES):
+                # 日をまたがない時間帯 (1:00-23:00)
+                if schedule_start_time < schedule_end_time:
+                    # スケジュールに該当する場合
+                    if schedule_start_time <= file_time < schedule_end_time:
+                        key = (file_date, schedule_start_time,
+                               upload_file.battle, upload_file.rule)
+                        time_scheduled_files[key].append(upload_file)
                         break
-                else:  # 日をまたぐ時間帯 (23:00-1:00)
-                    if file_time >= start or file_time < end:
+
+                # 日をまたぐ時間帯 (23:00-1:00)
+                else:
+                    # スケジュールに該当する場合
+                    if file_time >= schedule_start_time or file_time < schedule_end_time:
                         # 日をまたぐ場合は1:00を含む日付に調整
-                        adjusted_date = file_date if file_time >= start else file_date - \
+                        adjusted_date = file_date if file_time >= schedule_start_time else file_date - \
                             datetime.timedelta(days=1)
-                        bucket_key = (adjusted_date, start,
-                                      upload_file.battle, upload_file.rule)
-                        buckets[bucket_key].append(upload_file)
+                        key = (adjusted_date, schedule_start_time,
+                               upload_file.battle, upload_file.rule)
+                        time_scheduled_files[key].append(upload_file)
                         break
-        return buckets
+        return time_scheduled_files
 
-    def _concat_files(self, files: List[UploadFile], day: datetime.date, time: datetime.time, battle: str, rule: str) -> str:
-        extension = files[0].extension
-        file_name = f"{day.strftime(
-            "%Y-%m-%d")}_{time.strftime("%H")}_{battle}_{rule}{extension}"
-        path = os.path.join(self.PENDING_DIR, file_name)
-
+    def _concat_files(self, files: List[UploadFile], output_path: str):
         # ファイルが一つの場合は結合する必要がないのでリネーム＆移動
         if len(files) == 1:
-            shutil.copyfile(files[0].path, path)
-            return path
+            shutil.copyfile(files[0].path, output_path)
+            return
 
         file_names = [file.path for file in files]
-        FFmpeg.concat(file_names, path)
-        return path
+        FFmpeg.concat(file_names, output_path)
 
     def _generate_title_and_description(self, files: List[UploadFile], day: datetime.date, time: datetime.time, battle: str, rule: str) -> Tuple[str, str]:
         description = ""
         elapsed_time = 0
         win_count = 0
         lose_count = 0
+        last_xpower = 0.0
         max_xpower: Optional[float] = None
         min_xpower: Optional[float] = None
+
         for file in files:
+            # タイトルに付けるため、勝敗数をカウント
+            if "WIN" in file.result:
+                win_count += 1
+            elif "LOSE" in file.result:
+                lose_count += 1
+
             if file.xpower:
+                # タイトルにつけるため、最大と最小のXパワーを取得
                 if max_xpower is None or file.xpower > max_xpower:
                     max_xpower = file.xpower
                 if min_xpower is None or file.xpower < min_xpower:
                     min_xpower = file.xpower
-                description += f"XP: {file.xpower}\n"
+
+                # Xパワーの変動があったタイミングだけ説明にXパワーを記載
+                if last_xpower != file.xpower:
+                    description += f"XP: {file.xpower}\n"
+                    last_xpower = file.xpower
 
             elapsed_time_str = self._timedelta_to_str(
                 datetime.timedelta(seconds=elapsed_time))
             description += f"{elapsed_time_str} {file.result}\n"
             elapsed_time += file.length
 
-            if "WIN" in file.result:
-                win_count += 1
-            elif "LOSE" in file.result:
-                lose_count += 1
-
         if max_xpower and min_xpower:
             if max_xpower == min_xpower:
                 xpower = f"({max_xpower})"
             else:
-                xpower = f"({min_xpower}～{max_xpower})"
+                common_prefix_length = 0
+                min_xpower_str = str(min_xpower)
+                max_xpower_str = str(max_xpower)
+                for i in range(min(len(min_xpower_str), len(max_xpower_str))):
+                    if min_xpower_str[i] == max_xpower_str[i]:
+                        common_prefix_length += 1
+                    else:
+                        break
+                xpower = f"({
+                    min_xpower_str}-{max_xpower_str[common_prefix_length:]})"
         else:
             xpower = ""
 
-        title = f"{day.strftime(
-            "%Y-%m-%d")} {time.strftime("%H")}:00～ {battle}{xpower} {rule} {win_count}勝{lose_count}敗"
+        day_str = day.strftime("'%y.%m.%d")
+        time_str = time.strftime("%H")
+        if time_str.startswith("0"):
+            time_str = time_str[1:]
+
+        title = f"{day_str} {time_str}時～ {battle}{
+            xpower} {rule} {win_count}勝{lose_count}敗"
         return title, description
 
-    def start_upload(self):
+    def upload(self):
         logger.info("アップロード処理を開始します")
         upload_files = self._get_upload_files()
-        buckets = self._split_by_time_ranges(upload_files)
-        for key, files in buckets.items():
+        time_scheduled_files = self._split_by_time_ranges(upload_files)
+        for key, files in time_scheduled_files.items():
             day, time, battle, rule = key
-            path = self._concat_files(files, day, time, battle, rule)
+
+            extension = files[0].extension
+            file_name = f"{day.strftime(
+                "%Y-%m-%d")}_{time.strftime("%H")}_{battle}_{rule}{extension}"
+            path = os.path.join(self.PENDING_DIR, file_name)
+
+            self._concat_files(files, path)
             title, description = self._generate_title_and_description(
                 files, day, time, battle, rule)
 
@@ -257,13 +292,18 @@ class Uploader:
             res = self._youtube.upload(path, title, description)
             if res:
                 logger.info("YouTubeにアップロードしました")
-                os.remove(path)
-                for file in files:
-                    os.remove(file.path)
+                try:
+                    os.remove(path)
+                    for file in files:
+                        os.remove(file.path)
+                except Exception as e:
+                    logger.warning(f"アップロード後のファイル削除に失敗しました: {e}")
+                    logger.warning("同じファイルが再度アップロードされる可能性があります")
             else:
                 logger.info("YouTubeへのアップロードに失敗しました")
 
-        shutdoen_after_upload = bool(os.environ["SHUTDOWN_AFTER_UPLOAD"])
-        if shutdoen_after_upload:
-            logger.info("アップロード処理が完了したため、PCをシャットダウンします")
-            os.system("shutdown -s -t 0 -f")
+        logger.info("アップロード処理が完了しました")
+        if self._upload_complete_callback:
+            logger.info("アップロード完了コールバックを実行します")
+            self._upload_complete_callback()
+            logger.info("アップロード完了コールバックが完了しました")

@@ -1,6 +1,7 @@
 import os
 import logging
 import time
+import datetime
 import subprocess
 from typing import Optional, Tuple
 
@@ -11,7 +12,19 @@ logger = logging.getLogger(__name__)
 
 # https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md
 
+
 class Obs:
+
+    @staticmethod
+    def get_start_datetime(path: str) -> Optional[datetime.datetime]:
+        try:
+            file_base_name, _ = os.path.splitext(os.path.basename(path))
+            start_datetime = datetime.datetime.strptime(
+                file_base_name, "%Y-%m-%d %H-%M-%S")
+            return start_datetime
+        except:
+            return None
+
     def __init__(self):
         self.DIRECTORY = os.environ["OBS_DIRECTORY"]
         self.FILE = os.environ["OBS_FILE"]
@@ -20,7 +33,7 @@ class Obs:
         self.PASSWORD = os.environ["OBS_WS_PASSWORD"]
 
         self._process = self._start_process()
-        
+
         self._ws = obsws(self.HOST, self.PORT, self.PASSWORD)
         self._ws.connect()
         logger.info("OBS WebSocketに接続しました")
@@ -29,9 +42,10 @@ class Obs:
         if self._is_running():
             logger.info("OBSは既に起動しています")
             return None
-        
+
         os.chdir(self.DIRECTORY)
-        process = subprocess.Popen(self.FILE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        process = subprocess.Popen(
+            self.FILE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         logger.info("OBSを起動しました")
 
         # 起動直後はWebSocket接続に失敗するので起動待ちする
@@ -46,7 +60,8 @@ class Obs:
                 return True
         return False
 
-    def __del__(self):
+    def close(self):
+        self.stop_virtual_cam()
         self._ws.disconnect()
         if self._process:
             self._process.terminate()
@@ -59,13 +74,29 @@ class Obs:
         if status:
             logger.info("仮想カメラは既に起動しています")
             return True
-        
+
         result = self._ws.call(requests.StartVirtualCam())
         if not result.status:
             logger.info("仮想カメラの起動に失敗しました")
             return False
-        
+
         logger.info("仮想カメラを開始しました")
+        return True
+
+    def stop_virtual_cam(self) -> bool:
+
+        result = self._ws.call(requests.GetVirtualCamStatus())
+        status = result.datain.get("outputActive", False)
+        if status == False:
+            logger.info("仮想カメラは既に停止しています")
+            return True
+
+        result = self._ws.call(requests.StopVirtualCam())
+        if not result.status:
+            logger.info("仮想カメラの停止に失敗しました")
+            return False
+
+        logger.info("仮想カメラを停止しました")
         return True
 
     def start_record(self) -> bool:
@@ -75,12 +106,12 @@ class Obs:
         if status:
             logger.info("録画は既に開始しています")
             return True
-        
+
         result = self._ws.call(requests.StartRecord())
         if not result.status:
             logger.info("録画の開始に失敗しました")
             return False
-        
+
         logger.info("録画を開始しました")
         return True
 
@@ -90,11 +121,11 @@ class Obs:
         if not result.status:
             logger.info("録画の停止に失敗しました")
             return False, None
-        
+
         output = result.datain.get("outputPath", None)
         if not output:
             logger.info("録画ファイルが見つかりません")
             return False, None
-        
+
         logger.info("録画を停止しました")
         return True, output

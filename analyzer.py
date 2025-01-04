@@ -28,6 +28,7 @@ class Analyzer:
         self._start_matcher = TemplateMatcher(
             os.path.join(directory, "templates", "start.png"))
         self._stop_matcher = TemplateMatcher("templates\\stop.png")
+        self._abort_matcher = TemplateMatcher("templates\\abort.png")
         self._result_matchers = {
             "WIN!": TemplateMatcher("templates\\win.png"),
             "LOSE...": TemplateMatcher("templates\\lose.png")
@@ -57,7 +58,7 @@ class Analyzer:
         }
 
     def screen_off(self, image: np.ndarray) -> bool:
-        return image.max() <= 10
+        return 0 < image.max() <= 10
 
     def battle_start(self, image: np.ndarray) -> bool:
         match, _ = self._start_matcher.match(image)
@@ -65,6 +66,10 @@ class Analyzer:
 
     def battle_stop(self, image: np.ndarray) -> bool:
         match, _ = self._stop_matcher.match(image)
+        return match
+
+    def battle_abort(self, image: np.ndarray) -> bool:
+        match, _ = self._abort_matcher.match(image)
         return match
 
     def _find(self, image: np.ndarray, matchers: Dict[str, TemplateMatcher]) -> Optional[str]:

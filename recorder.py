@@ -43,54 +43,55 @@ class Recorder:
 
     def run(self):
         try:
-            # Switchの起動有無に関わらず、ずっと映像入力を監視する (起動してないときは1分周期で起動待ちをする)
             status = RecordStatus.OFF
             while True:
                 frame = self._capture.read()
 
-                if status == RecordStatus.OFF:
-                    # Switchの起動確認
-                    status = self._handle_off_status(frame)
+                status = self._check_switch_power_status(frame, status)
 
-                else:
-                    status = self._check_power_off(frame) or status
+                if status == RecordStatus.WAIT:
+                    # バトル開始確認し、開始したら録画開始
+                    status = self._handle_wait_status(frame)
 
-                    if status == RecordStatus.WAIT:
-                        # バトル開始確認し、開始したら録画開始
-                        status = self._handle_wait_status(frame)
-
-                    elif status == RecordStatus.RECORD:
-                        # バトル終了確認し、終了したら録画停止＆アップロード待ちに追加
-                        status = self._handle_record_status(frame)
+                elif status == RecordStatus.RECORD:
+                    # バトル終了確認し、終了したら録画停止＆アップロード待ちに追加
+                    status = self._handle_record_status(frame)
 
         except KeyboardInterrupt:
             logger.info("監視を終了します")
 
         finally:
+            logger.info("リソースを解放します")
             self._capture.release()
+            self._obs.close()
 
-    def _handle_off_status(self, frame: np.ndarray) -> RecordStatus:
-        # まだ起動してなかったら、1分後に再度確認する
-        if self._analyzer.screen_off(frame):
-            time.sleep(60)
-            return RecordStatus.OFF
-
-        logger.info("Switchが起動しました")
-        return RecordStatus.WAIT
-
-    def _check_power_off(self, frame: np.ndarray) -> Optional[RecordStatus]:
-        # Switchが電源OFFされたかの確認 (処理負荷を下げるため1分毎に確認する)
-        if time.time() - self._last_power_check_time < 60:
-            return None
+    def _check_switch_power_status(self, frame: np.ndarray, current_status: RecordStatus) -> RecordStatus:
+        # Switchの電源状態を確認する (処理負荷を下げるため10秒毎に確認する)
+        if time.time() - self._last_power_check_time < 10:
+            return current_status
         self._last_power_check_time = time.time()
 
-        if not self._analyzer.screen_off(frame):
-            return None
+        if self._analyzer.screen_off(frame):
 
-        logger.info("Switchが電源OFFされました")
-        if self._power_off_callback:
-            self._power_off_callback()
-        return RecordStatus.OFF
+            # 電源ON→OFF
+            if current_status != RecordStatus.OFF:
+                logger.info("Switchが電源OFFされました")
+                if self._power_off_callback:
+                    self._power_off_callback()
+                    logger.info("電源OFF時のコールバックを実行しました")
+
+            return RecordStatus.OFF
+
+        # 電源OFF→ON
+        if current_status == RecordStatus.OFF:
+            import cv2
+            cv2.imwrite(
+                r"C:\Users\shogo\repo\splat-replay\screen_on.png", frame)
+            logger.info("Switchが起動しました")
+            return RecordStatus.WAIT
+
+        # 電源ON→ON
+        return current_status
 
     def _handle_wait_status(self, frame: np.ndarray) -> RecordStatus:
 
@@ -103,18 +104,29 @@ class Recorder:
                 self._x_power[rule] = xp
 
         start = self._analyzer.battle_start(frame)
-        if not start:
-            return RecordStatus.WAIT
+        if start:
+            self._start_record()
+            return RecordStatus.RECORD
 
-        self._start_record()
-        return RecordStatus.RECORD
+        return RecordStatus.WAIT
 
     def _handle_record_status(self, frame: np.ndarray) -> RecordStatus:
+
+        record_time = time.time() - self._record_start_time
+
         # 万一、バトル終了を画像検知できなかったときのため、10分でタイムアウトさせる
-        if time.time() - self._record_start_time > 600:
+        if record_time > 600:
             logger.info("録画がタイムアウトしたため、録画を停止します")
             self._stop_record(frame)
             return RecordStatus.WAIT
+
+        # 開始1分くらいはバトル中断があり得るので、それを監視する
+        if record_time < 90:
+            abort = self._analyzer.battle_abort(frame)
+            if abort:
+                logger.info("バトルが中断されたため、録画を中止します")
+                self._cancel_record(frame)
+                return RecordStatus.WAIT
 
         # 勝敗判定
         if self._battle_result is None:
@@ -137,6 +149,15 @@ class Recorder:
         self._record_start_time = time.time()
         self._battle_result = None
 
+    def _cancel_record(self):
+        logger.info("録画を中止します")
+        _, path = self._obs.stop_record()
+
+        try:
+            os.remove(path)
+        except Exception as e:
+            logger.warning(f"中断された録画ファイルの削除に失敗しました: {e}")
+
     def _stop_record(self, frame: np.ndarray):
         logger.info("録画を停止します")
         _, path = self._obs.stop_record()
@@ -148,14 +169,7 @@ class Recorder:
         logger.info(f"ルール: {rule}")
 
         # アップロードキューに追加
-        file_base_name, _ = os.path.splitext(os.path.basename(path))
-        start_datetime = datetime.datetime.strptime(
-            file_base_name, "%Y-%m-%d %H-%M-%S")
+        start_datetime = Obs.get_start_datetime(path)
         Uploader.queue(path, start_datetime, match, rule,
                        self._battle_result, self._x_power.get(rule, None))
         logger.info("アップロードキューに追加しました")
-
-        if match == "" or rule == "":
-            logger.info("マッチ・ルールの判定に失敗しました")
-
-        self._x_power = {}
