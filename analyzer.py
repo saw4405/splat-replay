@@ -1,8 +1,10 @@
 import os
+import hashlib
 from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
 import logging
 
+import cv2
 import numpy as np
 
 from template_matcher import TemplateMatcher
@@ -56,6 +58,16 @@ class Analyzer:
                 "ガチアサリ": TemplateMatcher("templates\\xp_asari1.png"),
             }
         }
+        virtual_camera_off_image = cv2.imread(
+            "templates\\virtual_camera_off.png")
+        self._virtual_camera_off = self._hash(virtual_camera_off_image)
+
+    def _hash(self, image: np.ndarray) -> str:
+        hash = hashlib.sha1(image).hexdigest()
+        return hash
+
+    def virtual_camera_off(self, image: np.ndarray) -> bool:
+        return self._hash(image) == self._virtual_camera_off
 
     def screen_off(self, image: np.ndarray) -> bool:
         return 0 < image.max() <= 10

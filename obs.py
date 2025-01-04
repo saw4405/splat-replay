@@ -7,6 +7,9 @@ from typing import Optional, Tuple
 
 import psutil
 from obswebsocket import obsws, requests
+from obswebsocket.exceptions import ConnectionFailure
+from obswebsocket.base_classes import Baserequests
+from websocket import WebSocketConnectionClosedException
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 class Obs:
+    DIRECTORY = os.environ["OBS_DIRECTORY"]
+    FILE = os.environ["OBS_FILE"]
+    HOST = os.environ["OBS_WS_HOST"]
+    PORT = os.environ["OBS_WS_PORT"]
+    PASSWORD = os.environ["OBS_WS_PASSWORD"]
 
     @staticmethod
     def get_start_datetime(path: str) -> Optional[datetime.datetime]:
@@ -26,25 +34,30 @@ class Obs:
             return None
 
     def __init__(self):
-        self.DIRECTORY = os.environ["OBS_DIRECTORY"]
-        self.FILE = os.environ["OBS_FILE"]
-        self.HOST = os.environ["OBS_WS_HOST"]
-        self.PORT = os.environ["OBS_WS_PORT"]
-        self.PASSWORD = os.environ["OBS_WS_PASSWORD"]
+        self._process: Optional[subprocess.Popen] = None
+        self._ws: Optional[obsws] = None
 
-        self._process = self._start_process()
+        self._start_and_connect_obs()
 
-        self._ws = obsws(self.HOST, self.PORT, self.PASSWORD)
-        self._ws.connect()
-        logger.info("OBS WebSocketに接続しました")
+    def _start_and_connect_obs(self):
+        self._start_obs_process()
+        self._connect_obs()
 
-    def _start_process(self) -> Optional[subprocess.Popen]:
+    def _connect_obs(self):
+        if self._ws is None:
+            self._ws = obsws(self.HOST, self.PORT, self.PASSWORD)
+
+        if not self._ws.ws or not self._ws.ws.connected:
+            self._ws.connect()
+            logger.info("OBS WebSocketに接続しました")
+
+    def _start_obs_process(self):
         if self._is_running():
             logger.info("OBSは既に起動しています")
             return None
 
         os.chdir(self.DIRECTORY)
-        process = subprocess.Popen(
+        self._process = subprocess.Popen(
             self.FILE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         logger.info("OBSを起動しました")
 
@@ -52,7 +65,6 @@ class Obs:
         while not self._is_running():
             time.sleep(1)
         time.sleep(5)
-        return process
 
     def _is_running(self) -> bool:
         for proc in psutil.process_iter(['name']):
@@ -67,15 +79,23 @@ class Obs:
             self._process.terminate()
             logger.info("OBSを終了しました")
 
+    def _request_obs(self, request: Baserequests) -> Baserequests:
+        # 途中でOBSが終了している場合に備えて、起動と接続を確認する
+        self._start_and_connect_obs()
+
+        result = self._ws.call(request)
+        return result
+
     def start_virtual_cam(self) -> bool:
 
-        result = self._ws.call(requests.GetVirtualCamStatus())
+        result = self._request_obs(requests.GetVirtualCamStatus())
+
         status = result.datain.get("outputActive", False)
         if status:
             logger.info("仮想カメラは既に起動しています")
             return True
 
-        result = self._ws.call(requests.StartVirtualCam())
+        result = self._request_obs(requests.StartVirtualCam())
         if not result.status:
             logger.info("仮想カメラの起動に失敗しました")
             return False
@@ -85,13 +105,13 @@ class Obs:
 
     def stop_virtual_cam(self) -> bool:
 
-        result = self._ws.call(requests.GetVirtualCamStatus())
+        result = self._request_obs(requests.GetVirtualCamStatus())
         status = result.datain.get("outputActive", False)
         if status == False:
             logger.info("仮想カメラは既に停止しています")
             return True
 
-        result = self._ws.call(requests.StopVirtualCam())
+        result = self._request_obs(requests.StopVirtualCam())
         if not result.status:
             logger.info("仮想カメラの停止に失敗しました")
             return False
@@ -101,13 +121,13 @@ class Obs:
 
     def start_record(self) -> bool:
 
-        result = self._ws.call(requests.GetRecordStatus())
+        result = self._request_obs(requests.GetRecordStatus())
         status = result.datain.get("outputActive", False)
         if status:
             logger.info("録画は既に開始しています")
             return True
 
-        result = self._ws.call(requests.StartRecord())
+        result = self._request_obs(requests.StartRecord())
         if not result.status:
             logger.info("録画の開始に失敗しました")
             return False
@@ -117,7 +137,7 @@ class Obs:
 
     def stop_record(self) -> Tuple[bool, Optional[str]]:
 
-        result = self._ws.call(requests.StopRecord())
+        result = self._request_obs(requests.StopRecord())
         if not result.status:
             logger.info("録画の停止に失敗しました")
             return False, None

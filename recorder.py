@@ -72,21 +72,23 @@ class Recorder:
         self._last_power_check_time = time.time()
 
         if self._analyzer.screen_off(frame):
-
             # 電源ON→OFF
             if current_status != RecordStatus.OFF:
                 logger.info("Switchが電源OFFされました")
                 if self._power_off_callback:
                     self._power_off_callback()
                     logger.info("電源OFF時のコールバックを実行しました")
+            return RecordStatus.OFF
 
+        # PCがスリープから復帰したとき、キャプチャボードの接続が切れているので、再接続する
+        if self._analyzer.virtual_camera_off(frame):
+            logger.info("仮想カメラがOFFされました")
+            if not self._obs.start_virtual_cam():
+                logger.warning("仮想カメラの再起動に失敗しました")
             return RecordStatus.OFF
 
         # 電源OFF→ON
         if current_status == RecordStatus.OFF:
-            import cv2
-            cv2.imwrite(
-                r"C:\Users\shogo\repo\splat-replay\screen_on.png", frame)
             logger.info("Switchが起動しました")
             return RecordStatus.WAIT
 
