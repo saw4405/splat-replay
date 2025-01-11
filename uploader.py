@@ -2,18 +2,15 @@ import os
 import logging
 import shutil
 import glob
-import time
 import datetime
-import threading
 from collections import defaultdict
-import subprocess
-from typing import Dict, List, Tuple, Optional, Callable
+from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
 import cv2
-import schedule
 
 from youtube import Youtube
+from ffmpeg import FFmpeg
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +37,8 @@ class UploadFile:
         metadata = self._extract_metadata(file_base_name)
         self.start = datetime.datetime.strptime(
             metadata[0], self.DATETIME_FORMAT)
-        self.battle = metadata[1]
-        self.rule = metadata[2]
-        self.result = metadata[3]
-        self.xpower = metadata[4] if len(metadata) == 5 else None
+        self.battle, self.rule, self.result = metadata[1:4]
+        self.xpower = float(metadata[4]) if len(metadata) == 5 else None
         self.length = self._get_video_length()
 
     def _extract_metadata(self, file_base_name: str) -> List[str]:
@@ -76,38 +71,6 @@ class UploadFile:
         return file_base_name
 
 
-class FFmpeg:
-    @staticmethod
-    def concat(files: List[str], out_path: str):
-        directory = os.path.dirname(files[0])
-        _, extension = os.path.splitext(out_path)
-
-        concat_list = "list.txt"
-        concat_list_path = os.path.join(directory, concat_list)
-        try:
-            with open(concat_list_path, "w", encoding="utf-8") as f:
-                f.writelines(
-                    [f"file '{os.path.basename(file)}'\n" for file in files])
-
-            os.chdir(directory)
-            command = [
-                "ffmpeg",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", concat_list,
-                "-c", "copy",
-                f"temp{extension}"
-            ]
-            subprocess.run(command, check=True)
-            os.rename(f"temp{extension}", out_path)
-
-        finally:
-            try:
-                os.remove(concat_list_path)
-            except Exception as e:
-                logger.warning(f"一時ファイルの削除に失敗しました: {e}")
-
-
 class Uploader:
     RECORDED_DIR = os.path.join(
         os.path.dirname(__file__), "videos", "recorded")
@@ -137,26 +100,13 @@ class Uploader:
                                 new_file_base_name + extension)
         os.rename(path, new_path)
 
-    def __init__(self, upload_complete_callback: Optional[Callable[[], None]] = None):
-        self._upload_complete_callback = upload_complete_callback
+    def __init__(self):
+        super().__init__()
 
         os.makedirs(self.RECORDED_DIR, exist_ok=True)
         os.makedirs(self.PENDING_DIR, exist_ok=True)
 
         self._youtube = Youtube()
-
-    def monitor_upload_schedule(self, upload_time: str):
-        schedule.every().day.at(upload_time).do(self.upload)
-        logger.info(f"アップロードスケジュールを設定しました: {upload_time}")
-
-        def run_upload_loop(self):
-            logger.info("アップロード処理の待機中です")
-            while True:
-                schedule.run_pending()
-                time.sleep(360)
-
-        thread = threading.Thread(target=run_upload_loop, daemon=True)
-        thread.start()
 
     def _timedelta_to_str(self, delta: datetime.timedelta) -> str:
         total_seconds = int(delta.total_seconds())
@@ -231,10 +181,10 @@ class Uploader:
 
             if file.xpower:
                 # タイトルにつけるため、最大と最小のXパワーを取得
-                if max_xpower is None or file.xpower > max_xpower:
-                    max_xpower = file.xpower
-                if min_xpower is None or file.xpower < min_xpower:
-                    min_xpower = file.xpower
+                max_xpower = max(
+                    max_xpower, file.xpower) if max_xpower is not None else file.xpower
+                min_xpower = min(
+                    min_xpower, file.xpower) if min_xpower is not None else file.xpower
 
                 # Xパワーの変動があったタイミングだけ説明にXパワーを記載
                 if last_xpower != file.xpower:
@@ -264,18 +214,29 @@ class Uploader:
             xpower = ""
 
         day_str = day.strftime("'%y.%m.%d")
-        time_str = time.strftime("%H")
-        if time_str.startswith("0"):
-            time_str = time_str[1:]
+        time_str = time.strftime("%H").lstrip("0")
 
         title = f"{day_str} {time_str}時～ {battle}{
             xpower} {rule} {win_count}勝{lose_count}敗"
         return title, description
 
+    def _delete_files(self, files: List[str]) -> bool:
+        result = True
+        for file in files:
+            try:
+                os.remove(file)
+            except Exception as e:
+                logger.error(f"ファイルの削除に失敗しました: {e}\n{file}")
+                result = False
+
+        return result
+
     def upload(self):
         logger.info("アップロード処理を開始します")
         upload_files = self._get_upload_files()
         time_scheduled_files = self._split_by_time_ranges(upload_files)
+
+        # 時間帯ごとにファイルを結合してアップロード
         for key, files in time_scheduled_files.items():
             day, time, battle, rule = key
 
@@ -292,18 +253,11 @@ class Uploader:
             res = self._youtube.upload(path, title, description)
             if res:
                 logger.info("YouTubeにアップロードしました")
-                try:
-                    os.remove(path)
-                    for file in files:
-                        os.remove(file.path)
-                except Exception as e:
-                    logger.warning(f"アップロード後のファイル削除に失敗しました: {e}")
-                    logger.warning("同じファイルが再度アップロードされる可能性があります")
+                delete_files = [path] + [file.path for file in files]
+                if not self._delete_files(delete_files):
+                    logger.warning(
+                        "アップロード後のファイル削除に失敗したため、同じファイルが再度アップロードされる可能性があります")
             else:
                 logger.info("YouTubeへのアップロードに失敗しました")
 
         logger.info("アップロード処理が完了しました")
-        if self._upload_complete_callback:
-            logger.info("アップロード完了コールバックを実行します")
-            self._upload_complete_callback()
-            logger.info("アップロード完了コールバックが完了しました")

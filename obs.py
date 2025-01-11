@@ -17,12 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class Obs:
-    DIRECTORY = os.environ["OBS_DIRECTORY"]
-    FILE = os.environ["OBS_FILE"]
-    HOST = os.environ["OBS_WS_HOST"]
-    PORT = os.environ["OBS_WS_PORT"]
-    PASSWORD = os.environ["OBS_WS_PASSWORD"]
-
     @staticmethod
     def get_start_datetime(path: str) -> Optional[datetime.datetime]:
         try:
@@ -34,6 +28,12 @@ class Obs:
             return None
 
     def __init__(self):
+        self.DIRECTORY = os.environ["OBS_DIRECTORY"]
+        self.FILE = os.environ["OBS_FILE"]
+        self.HOST = os.environ["OBS_WS_HOST"]
+        self.PORT = os.environ["OBS_WS_PORT"]
+        self.PASSWORD = os.environ["OBS_WS_PASSWORD"]
+
         self._process: Optional[subprocess.Popen] = None
         self._ws: Optional[obsws] = None
 
@@ -138,6 +138,7 @@ class Obs:
     def stop_record(self) -> Tuple[bool, Optional[str]]:
 
         result = self._request_obs(requests.StopRecord())
+        status = result.datain.get("outputActive", False)
         if not result.status:
             logger.info("録画の停止に失敗しました")
             return False, None

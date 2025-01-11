@@ -8,11 +8,13 @@ from obs import Obs
 # OBSの仮想カメラのインデックスを探すために使用してください
 # OBSの仮想カメラを有効にしたときにゲーム映像が表示され、無効にしたときにゲーム映像が表示されないインデックスを環境変数に設定してください
 # 通常、0がPCのカメラ、1がキャプチャボード、2がOBSの仮想カメラです
-def main():    
+
+
+def main():
     index = int(os.environ["CAPTURE_DEVICE_INDEX"])
     width = int(os.environ["CAPTURE_WIDTH"])
     height = int(os.environ["CAPTURE_HEIGHT"])
-    
+
     capture = cv2.VideoCapture(index)
     if not capture.isOpened():
         raise Exception("カメラが見つかりません")
@@ -36,6 +38,7 @@ def main():
     # カメラリソースとウィンドウを解放
     capture.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     dotenv.load_dotenv()

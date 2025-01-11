@@ -22,45 +22,50 @@ class Rectangle:
 
 
 class Analyzer:
+    DIRECTORY = os.path.join(os.path.dirname(__file__), "templates")
+
     def __init__(self):
         self._ocr = OCR()
 
-        # 画像判定に使用する画像を読み込んでおく
-        directory = os.path.dirname(__file__)
-        self._start_matcher = TemplateMatcher(
-            os.path.join(directory, "templates", "start.png"))
-        self._stop_matcher = TemplateMatcher("templates\\stop.png")
-        self._abort_matcher = TemplateMatcher("templates\\abort.png")
-        self._result_matchers = {
-            "WIN!": TemplateMatcher("templates\\win.png"),
-            "LOSE...": TemplateMatcher("templates\\lose.png")
-        }
-        self._match_matchers = {
-            "レギュラーマッチ": TemplateMatcher("templates\\regular.png"),
-            "バンカラマッチ(チャレンジ)": TemplateMatcher("templates\\bankara_challenge.png"),
-            "バンカラマッチ(オープン)": TemplateMatcher("templates\\bankara_open.png"),
-            "Xマッチ": TemplateMatcher("templates\\x.png")
-        }
-        self._rule_matchers = {
-            "ナワバリ": TemplateMatcher("templates\\nawabari.png"),
-            "ガチホコ": TemplateMatcher("templates\\hoko.png"),
-            "ガチエリア": TemplateMatcher("templates\\area.png"),
-            "ガチヤグラ": TemplateMatcher("templates\\yagura.png"),
-            "ガチアサリ": TemplateMatcher("templates\\asari.png")
-        }
-        self._select_xmatch_matcher = TemplateMatcher(
-            "templates\\select_xmatch.png")
+        self._start_matcher = self._create_matcher("start.png")
+        self._stop_matcher = self._create_matcher("stop.png")
+        self._abort_matcher = self._create_matcher("abort.png")
+        self._result_matchers = self._create_matchers({
+            "WIN!": "win.png",
+            "LOSE...": "lose.png"
+        })
+        self._match_matchers = self._create_matchers({
+            "レギュラーマッチ": "regular.png",
+            "バンカラマッチ(チャレンジ)": "bankara_challenge.png",
+            "バンカラマッチ(オープン)": "bankara_open.png",
+            "Xマッチ": "x.png"
+        })
+        self._rule_matchers = self._create_matchers({
+            "ナワバリ": "nawabari.png",
+            "ガチホコ": "hoko.png",
+            "ガチエリア": "area.png",
+            "ガチヤグラ": "yagura.png",
+            "ガチアサリ": "asari.png"
+        })
+        self._select_xmatch_matcher = self._create_matcher("select_xmatch.png")
         self._xp_machers_dictionary = {
-            Rectangle(1730, 190, 1880, 240): {
-                "ガチホコ": TemplateMatcher("templates\\xp_hoko1.png"),
-                "ガチエリア": TemplateMatcher("templates\\xp_area1.png"),
-                "ガチヤグラ": TemplateMatcher("templates\\xp_yagura1.png"),
-                "ガチアサリ": TemplateMatcher("templates\\xp_asari1.png"),
-            }
+            Rectangle(1730, 190, 1880, 240): self._create_matchers({
+                "ガチホコ": "xp_hoko1.png",
+                "ガチエリア": "xp_area1.png",
+                "ガチヤグラ": "xp_yagura1.png",
+                "ガチアサリ": "xp_asari1.png"
+            })
         }
         virtual_camera_off_image = cv2.imread(
-            "templates\\virtual_camera_off.png")
+            os.path.join(self.DIRECTORY, "virtual_camera_off.png"))
         self._virtual_camera_off = self._hash(virtual_camera_off_image)
+
+    def _create_matcher(self, filename: str) -> TemplateMatcher:
+        path = os.path.join(self.DIRECTORY, filename)
+        return TemplateMatcher(path)
+
+    def _create_matchers(self, filenames: Dict[str, str]) -> Dict[str, TemplateMatcher]:
+        return {name: self._create_matcher(filename) for name, filename in filenames.items()}
 
     def _hash(self, image: np.ndarray) -> str:
         hash = hashlib.sha1(image).hexdigest()

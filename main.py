@@ -1,9 +1,13 @@
 import os
+import time
 from typing import Optional
 import logging
 from logging.handlers import TimedRotatingFileHandler
+import threading
 
 import dotenv
+import schedule
+import win32com.client
 
 from recorder import Recorder
 from uploader import Uploader
@@ -14,21 +18,14 @@ class Main:
         dotenv.load_dotenv()
         self._setup_logger()
         self._logger = logging.getLogger(__name__)
-
-        SLEEP_AFTER_UPLOAD = bool(os.environ["SLEEP_AFTER_UPLOAD"])
-        self._logger.info(f"SLEEP_AFTER_UPLOAD: {SLEEP_AFTER_UPLOAD}")
-        self._upload_complete_callback = self.sleep_windows if SLEEP_AFTER_UPLOAD else None
-
-        self._UPLOAD_MODE = os.environ["UPLOAD_MODE"]
-        self._logger.info(f"UPLOAD_MODE: {self._UPLOAD_MODE}")
+        self._load_config()
+        self._recorder: Optional[Recorder] = None
+        self._uploader = Uploader()
 
     def _setup_logger(self):
         LOG_DIRECTORY = 'logs'
         LOG_FILE_NAME = 'splat-replay.log'
-
         os.makedirs(LOG_DIRECTORY, exist_ok=True)
-
-        # ロガーの設定
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s',
@@ -44,25 +41,61 @@ class Main:
             ]
         )
 
-    def sleep_windows(self):
-        self._logger.info("スリーブします")
-        os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
-        self._logger.info("スリープから復帰しました")
+    def _load_config(self):
+        self.SLEEP_AFTER_UPLOAD = bool(os.environ["SLEEP_AFTER_UPLOAD"])
+        self.UPLOAD_MODE = os.environ["UPLOAD_MODE"]
+        self.CAPTURE_DEVICE_NAME = os.environ["CAPTURE_DEVICE_NAME"]
+        self.UPLOAD_TIME = os.environ["UPLOAD_TIME"]
+
+    def _check_capture_device(self, device_name: str) -> bool:
+        wmi = win32com.client.GetObject("winmgmts:")
+        devices = wmi.InstancesOf("Win32_PnPEntity")
+        return any(str(device.Name) == device_name for device in devices)
+
+    def _wait_for_device(self):
+        while not self._check_capture_device(self.CAPTURE_DEVICE_NAME):
+            self._logger.error("キャプチャデバイスが見つかりません")
+            print("キャプチャボードを接続してください")
+            time.sleep(1)
+
+    def _setup_periodic_upload(self):
+        schedule.every().day.at(self.UPLOAD_TIME).do(self._handle_upload)
+        self._logger.info(f"アップロードスケジュールを設定しました: {self.UPLOAD_TIME}")
+
+        def upload_loop():
+            while True:
+                schedule.run_pending()
+                time.sleep(60)
+
+        threading.Thread(target=upload_loop, daemon=True).start()
+
+    def _handle_upload(self):
+        self._uploader.upload()
+
+        if self.SLEEP_AFTER_UPLOAD:
+            self._logger.info("スリープします")
+            os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
+
+            # スリーブするとOBSの接続が切れるので、いったん終了する (メインループで再接続する)
+            if self._recorder:
+                self._recorder.stop()
 
     def run(self):
-        recorder = Recorder()
-        uploader: Optional[Uploader] = None
+        if self.UPLOAD_MODE == "PERIODIC":
+            self._setup_periodic_upload()
 
-        if self._UPLOAD_MODE == "AUTO":
-            uploader = Uploader(self._upload_complete_callback)
-            recorder.register_power_off_callback(uploader.upload)
+        while True:
+            self._wait_for_device()
+            self._recorder = Recorder()
 
-        elif self._UPLOAD_MODE == "PERIODIC":
-            uploader = Uploader(self._upload_complete_callback)
-            UPLOAD_TIME = os.environ["UPLOAD_TIME"]
-            uploader.monitor_upload_schedule(UPLOAD_TIME)
+            if self.UPLOAD_MODE == "AUTO":
+                self._recorder.register_power_off_callback(self._handle_upload)
+                self._logger.info("アップロードコールバックを登録しました")
 
-        recorder.run()
+            self._recorder.start()
+            self._logger.info("recorder開始")
+            self._recorder.join()
+            self._logger.info("recorder終了")
 
 
 if __name__ == '__main__':

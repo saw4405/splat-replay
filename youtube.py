@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 class Youtube:
-    TOKEN_FILE = 'token.pickle'
-    CLIENT_SECRET_FILE = 'client_secrets.json'
-    API_NAME = 'youtube'
-    API_VERSION = 'v3'
-    SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
-
     def __init__(self):
+        self.TOKEN_FILE = 'token.pickle'
+        self.CLIENT_SECRET_FILE = 'client_secrets.json'
+        self.API_NAME = 'youtube'
+        self.API_VERSION = 'v3'
+        self.SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
+
         credentials = self._get_credentials()
         self._youtube = build(
             self.API_NAME, self.API_VERSION, credentials=credentials)

@@ -1,7 +1,6 @@
 import os
 import logging
 import time
-import datetime
 from typing import Dict, Callable, Optional
 from enum import Enum
 
@@ -11,6 +10,7 @@ from obs import Obs
 from uploader import Uploader
 from capture import Capture
 from analyzer import Analyzer
+from graceful_thread import GracefulThread
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,10 @@ class RecordStatus(Enum):
     RECORD = 3
 
 
-class Recorder:
+class Recorder(GracefulThread):
     def __init__(self):
+        super().__init__()
+
         self._obs = Obs()
         # バトル開始等の画像判定への入力として仮想カメラを起動する
         if not self._obs.start_virtual_cam():
@@ -44,7 +46,7 @@ class Recorder:
     def run(self):
         try:
             status = RecordStatus.OFF
-            while True:
+            while not self.stopped:
                 frame = self._capture.read()
 
                 status = self._check_switch_power_status(frame, status)
@@ -56,9 +58,6 @@ class Recorder:
                 elif status == RecordStatus.RECORD:
                     # バトル終了確認し、終了したら録画停止＆アップロード待ちに追加
                     status = self._handle_record_status(frame)
-
-        except KeyboardInterrupt:
-            logger.info("監視を終了します")
 
         finally:
             logger.info("リソースを解放します")
@@ -123,12 +122,10 @@ class Recorder:
             return RecordStatus.WAIT
 
         # 開始1分くらいはバトル中断があり得るので、それを監視する
-        if record_time < 90:
-            abort = self._analyzer.battle_abort(frame)
-            if abort:
-                logger.info("バトルが中断されたため、録画を中止します")
-                self._cancel_record(frame)
-                return RecordStatus.WAIT
+        if record_time < 90 and self._analyzer.battle_abort(frame):
+            logger.info("バトルが中断されたため、録画を中止します")
+            self._cancel_record(frame)
+            return RecordStatus.WAIT
 
         # 勝敗判定
         if self._battle_result is None:
@@ -138,8 +135,7 @@ class Recorder:
             return RecordStatus.RECORD
 
         # 処理負荷を下げるため、勝敗が決まってから録画停止タイミングを監視する
-        stop = self._analyzer.battle_stop(frame)
-        if stop:
+        if self._analyzer.battle_stop(frame):
             self._stop_record(frame)
             return RecordStatus.WAIT
 

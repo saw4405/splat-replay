@@ -70,6 +70,8 @@
         * 動画のアップロードを定期的にバッチ処理するために使用
     * `pytesseract`
         * XPの読み込み等でOCRを使うために使用
+    * `pywin32` pip install pypiwin32
+        * キャプチャボードの接続確認のために使用
 
 4. `.example.env`を`.env`にリネームし、OBSのWebSocketのパスワード等を設定する
 
