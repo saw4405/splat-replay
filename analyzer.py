@@ -27,6 +27,8 @@ class Analyzer:
     def __init__(self):
         self._ocr = OCR()
 
+        self._matching_matcher = self._create_matcher(
+            "matching.png")
         self._start_matcher = self._create_matcher("start.png")
         self._stop_matcher = self._create_matcher("stop.png")
         self._abort_matcher = self._create_matcher("abort.png")
@@ -76,6 +78,10 @@ class Analyzer:
 
     def screen_off(self, image: np.ndarray) -> bool:
         return 0 < image.max() <= 10
+
+    def matching_start(self, image: np.ndarray) -> bool:
+        match, _ = self._matching_matcher.match(image)
+        return match
 
     def battle_start(self, image: np.ndarray) -> bool:
         match, _ = self._start_matcher.match(image)

@@ -82,6 +82,8 @@
     2. 判定に使用する画面のスクリーンショットをとる
        * Xマッチ選択時の画面
          * `select_xmatch.png`、`xp_area1.png`、`xp_asari1.png`、`xp_hoko1.png`、`xp_yagura1.png`
+       * マッチング中の画面
+         * `matching.png`
        * バトル開始時に敵・味方のプレートが表示されている画面
          * `start.png`
        * バトル終了時に勝敗判定をしている画面

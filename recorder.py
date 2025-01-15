@@ -1,6 +1,7 @@
 import os
 import logging
 import time
+import datetime
 from typing import Dict, Callable, Optional
 from enum import Enum
 
@@ -33,6 +34,7 @@ class Recorder(GracefulThread):
         self._capture = Capture()
         self._analyzer = Analyzer()
 
+        self._matching_start_time: Optional[datetime.datetime] = None
         self._battle_result: Optional[str] = None
         self._x_power: Dict[str, float] = {}
         self._record_start_time = time.time()
@@ -97,15 +99,18 @@ class Recorder(GracefulThread):
     def _handle_wait_status(self, frame: np.ndarray) -> RecordStatus:
 
         # XPが表示されたら記録しとく
-        result = self._analyzer.x_power(frame)
-        if result:
+        if result := self._analyzer.x_power(frame):
             rule, xp = result
             if self._x_power.get(rule, 0.0) != xp:
                 logger.info(f"{rule}のXパワー: {xp}")
                 self._x_power[rule] = xp
 
-        start = self._analyzer.battle_start(frame)
-        if start:
+        # 動画のスケジュール分けを正確にできるよう、マッチング開始時の日時を記録しておく
+        if self._matching_start_time is None and self._analyzer.matching_start(frame):
+            self._matching_start_time = datetime.datetime.now()
+            logger.info("マッチング開始を検知しました")
+
+        if self._analyzer.battle_start(frame):
             self._start_record()
             return RecordStatus.RECORD
 
@@ -151,6 +156,8 @@ class Recorder(GracefulThread):
         logger.info("録画を中止します")
         _, path = self._obs.stop_record()
 
+        self._matching_start_time = None
+
         try:
             os.remove(path)
         except Exception as e:
@@ -167,7 +174,10 @@ class Recorder(GracefulThread):
         logger.info(f"ルール: {rule}")
 
         # アップロードキューに追加
-        start_datetime = Obs.get_start_datetime(path)
+        start_datetime = self._matching_start_time or \
+            Obs.get_start_datetime(path)
         Uploader.queue(path, start_datetime, match, rule,
                        self._battle_result, self._x_power.get(rule, None))
         logger.info("アップロードキューに追加しました")
+
+        self._matching_start_time = None
