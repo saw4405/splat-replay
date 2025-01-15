@@ -53,10 +53,20 @@ class Main:
         return any(str(device.Name) == device_name for device in devices)
 
     def _wait_for_device(self):
-        while not self._check_capture_device(self.CAPTURE_DEVICE_NAME):
-            self._logger.error("キャプチャデバイスが見つかりません")
-            print("キャプチャボードを接続してください")
-            time.sleep(1)
+        animation = ["(●´・ω・)    ", "(●´・ω・)σ   ",
+                     "(●´・ω・)σσ  ", "(●´・ω・)σσσ ", "(●´・ω・)σσσσ"]
+
+        print("\033[?25l")  # カーソル非表示
+        try:
+            idx = 0
+            while not self._check_capture_device(self.CAPTURE_DEVICE_NAME):
+                message = f"\rキャプチャボード({self.CAPTURE_DEVICE_NAME})の接続待ち {
+                    animation[idx % len(animation)]}"
+                print(message, end="")
+                idx += 1
+                time.sleep(0.5)
+        finally:
+            print('\033[?25h')
 
     def _setup_periodic_upload(self):
         schedule.every().day.at(self.UPLOAD_TIME).do(self._handle_upload)
@@ -78,9 +88,11 @@ class Main:
 
             # スリーブするとOBSの接続が切れるので、いったん終了する (メインループで再接続する)
             if self._recorder:
+                self._logger.info("Recorderを一旦終了します")
                 self._recorder.stop()
 
     def run(self):
+        # 定期アップロードの場合、別スレッドで指定時刻にアップロードするループを回す
         if self.UPLOAD_MODE == "PERIODIC":
             self._setup_periodic_upload()
 
@@ -93,9 +105,7 @@ class Main:
                 self._logger.info("アップロードコールバックを登録しました")
 
             self._recorder.start()
-            self._logger.info("recorder開始")
             self._recorder.join()
-            self._logger.info("recorder終了")
 
 
 if __name__ == '__main__':
