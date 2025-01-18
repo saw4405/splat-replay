@@ -129,7 +129,7 @@ class Recorder(GracefulThread):
         # 開始1分くらいはバトル中断があり得るので、それを監視する
         if record_time < 90 and self._analyzer.battle_abort(frame):
             logger.info("バトルが中断されたため、録画を中止します")
-            self._cancel_record(frame)
+            self._cancel_record()
             return RecordStatus.WAIT
 
         # 勝敗判定
