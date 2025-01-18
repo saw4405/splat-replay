@@ -261,3 +261,9 @@ class Uploader:
                 logger.info("YouTubeへのアップロードに失敗しました")
 
         logger.info("アップロード処理が完了しました")
+
+
+# 直接Uploaderスクリプトを実行したとき、アップロードを実行する
+if __name__ == '__main__':
+    uploader = Uploader()
+    uploader.upload()
