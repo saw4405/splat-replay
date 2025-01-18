@@ -98,18 +98,22 @@ class Recorder(GracefulThread):
 
     def _handle_wait_status(self, frame: np.ndarray) -> RecordStatus:
 
-        # XPが表示されたら記録しとく
-        if result := self._analyzer.x_power(frame):
-            rule, xp = result
-            if self._x_power.get(rule, 0.0) != xp:
-                logger.info(f"{rule}のXパワー: {xp}")
-                self._x_power[rule] = xp
+        if self._matching_start_time is None:
+            # XPが表示されたら記録しとく (XPはマッチング開始前に表示される)
+            if result := self._analyzer.x_power(frame):
+                rule, xp = result
+                if self._x_power.get(rule, 0.0) != xp:
+                    logger.info(f"{rule}のXパワー: {xp}")
+                    self._x_power[rule] = xp
 
-        # 動画のスケジュール分けを正確にできるよう、マッチング開始時の日時を記録しておく
-        if self._matching_start_time is None and self._analyzer.matching_start(frame):
-            self._matching_start_time = datetime.datetime.now()
-            logger.info("マッチング開始を検知しました")
+            # 動画のスケジュール分けを正確にできるよう、マッチング開始時の日時を記録しておく
+            if self._analyzer.matching_start(frame):
+                self._matching_start_time = datetime.datetime.now()
+                logger.info("マッチング開始を検知しました")
 
+            return RecordStatus.WAIT
+
+        # 処理負荷を低減するため、マッチング開始を検知した後にバトル開始を監視する
         if self._analyzer.battle_start(frame):
             self._start_record()
             return RecordStatus.RECORD
@@ -181,3 +185,4 @@ class Recorder(GracefulThread):
         logger.info("アップロードキューに追加しました")
 
         self._matching_start_time = None
+        self._x_power = {}  # バトル後はXPが更新されている可能性があるので、いったんリセットする
