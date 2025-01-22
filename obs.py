@@ -87,7 +87,6 @@ class Obs:
         return result
 
     def start_virtual_cam(self) -> bool:
-
         result = self._request_obs(requests.GetVirtualCamStatus())
 
         status = result.datain.get("outputActive", False)
@@ -104,7 +103,6 @@ class Obs:
         return True
 
     def stop_virtual_cam(self) -> bool:
-
         result = self._request_obs(requests.GetVirtualCamStatus())
         status = result.datain.get("outputActive", False)
         if status == False:
@@ -119,11 +117,15 @@ class Obs:
         logger.info("仮想カメラを停止しました")
         return True
 
-    def start_record(self) -> bool:
-
+    def get_record_status(self) -> Tuple[bool, bool]:
         result = self._request_obs(requests.GetRecordStatus())
-        status = result.datain.get("outputActive", False)
-        if status:
+        active = result.datain.get("outputActive", False)
+        paused = result.datain.get("outputPaused", False)
+        return active, paused
+
+    def start_record(self) -> bool:
+        active, _ = self.get_record_status()
+        if active:
             logger.info("録画は既に開始しています")
             return True
 
@@ -136,9 +138,12 @@ class Obs:
         return True
 
     def stop_record(self) -> Tuple[bool, Optional[str]]:
+        active, _ = self.get_record_status()
+        if not active:
+            logger.info("録画は既に停止しています")
+            return True, None
 
         result = self._request_obs(requests.StopRecord())
-        status = result.datain.get("outputActive", False)
         if not result.status:
             logger.info("録画の停止に失敗しました")
             return False, None
@@ -150,3 +155,31 @@ class Obs:
 
         logger.info("録画を停止しました")
         return True, output
+
+    def pause_record(self) -> bool:
+        _, paused = self.get_record_status()
+        if paused:
+            logger.info("録画は既に一時停止しています")
+            return True
+
+        result = self._request_obs(requests.PauseRecord())
+        if not result.status:
+            logger.info("録画の一時停止に失敗しました")
+            return False
+
+        logger.info("録画を一時停止しました")
+        return True
+
+    def resume_record(self) -> bool:
+        _, paused = self.get_record_status()
+        if not paused:
+            logger.info("録画は一時停止していません")
+            return True
+
+        result = self._request_obs(requests.ResumeRecord())
+        if not result.status:
+            logger.info("録画の再開に失敗しました")
+            return False
+
+        logger.info("録画を再開しました")
+        return True

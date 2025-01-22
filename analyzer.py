@@ -76,8 +76,14 @@ class Analyzer:
     def virtual_camera_off(self, image: np.ndarray) -> bool:
         return self._hash(image) == self._virtual_camera_off
 
-    def screen_off(self, image: np.ndarray) -> bool:
-        return 0 < image.max() <= 10
+    def black_screen(self, image: np.ndarray) -> bool:
+        return image.max() <= 10
+
+    def loading(self, image: np.ndarray) -> bool:
+        # ロード画面は上部800pxが真っ黒
+        top_image = image[:800, :]
+        bottom_image = image[800:, :]
+        return self.black_screen(top_image) and not self.black_screen(bottom_image)
 
     def matching_start(self, image: np.ndarray) -> bool:
         match, _ = self._matching_matcher.match(image)

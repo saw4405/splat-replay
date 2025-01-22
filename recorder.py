@@ -20,6 +20,7 @@ class RecordStatus(Enum):
     OFF = 1
     WAIT = 2
     RECORD = 3
+    PAUSE = 4
 
 
 class Recorder(GracefulThread):
@@ -39,6 +40,7 @@ class Recorder(GracefulThread):
         self._x_power: Dict[str, float] = {}
         self._record_start_time = time.time()
         self._last_power_check_time = time.time()
+        self._screen_off_count = 0
 
         self._power_off_callback: Optional[Callable[[], None]] = None
 
@@ -61,6 +63,10 @@ class Recorder(GracefulThread):
                     # バトル終了確認し、終了したら録画停止＆アップロード待ちに追加
                     status = self._handle_record_status(frame)
 
+                elif status == RecordStatus.PAUSE:
+                    # ローディング終了を監視し、終了したら録画再開
+                    status = self._handle_pause_status(frame)
+
         finally:
             logger.info("リソースを解放します")
             self._capture.release()
@@ -72,7 +78,12 @@ class Recorder(GracefulThread):
             return current_status
         self._last_power_check_time = time.time()
 
-        if self._analyzer.screen_off(frame):
+        if self._analyzer.black_screen(frame):
+            self._screen_off_count += 1
+        else:
+            self._screen_off_count = 0
+
+        if self._screen_off_count >= 3:
             # 電源ON→OFF
             if current_status != RecordStatus.OFF:
                 logger.info("Switchが電源OFFされました")
@@ -143,6 +154,11 @@ class Recorder(GracefulThread):
                 logger.info(f"バトル結果: {self._battle_result}")
             return RecordStatus.RECORD
 
+        # ローディング中は録画を一時停止する
+        if self._analyzer.loading(frame):
+            self._pause_record()
+            return RecordStatus.PAUSE
+
         # 処理負荷を下げるため、勝敗が決まってから録画停止タイミングを監視する
         if self._analyzer.battle_stop(frame):
             self._stop_record(frame)
@@ -150,11 +166,26 @@ class Recorder(GracefulThread):
 
         return RecordStatus.RECORD
 
+    def _handle_pause_status(self, frame: np.ndarray) -> RecordStatus:
+        if not self._analyzer.loading(frame):
+            self._resume_record()
+            return RecordStatus.RECORD
+
+        return RecordStatus.PAUSE
+
     def _start_record(self):
         logger.info("録画を開始します")
         self._obs.start_record()
         self._record_start_time = time.time()
         self._battle_result = None
+
+    def _pause_record(self):
+        logger.info("録画を一時停止します")
+        self._obs.pause_record()
+
+    def _resume_record(self):
+        logger.info("録画を再開します")
+        self._obs.resume_record()
 
     def _cancel_record(self):
         logger.info("録画を中止します")
