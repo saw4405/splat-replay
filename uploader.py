@@ -25,6 +25,7 @@ class UploadFile:
     start: datetime.datetime
     battle: str
     rule: str
+    stage: str
     result: str
     xpower: Optional[float]
     length: float
@@ -37,13 +38,13 @@ class UploadFile:
         metadata = self._extract_metadata(file_base_name)
         self.start = datetime.datetime.strptime(
             metadata[0], self.DATETIME_FORMAT)
-        self.battle, self.rule, self.result = metadata[1:4]
-        self.xpower = float(metadata[4]) if len(metadata) == 5 else None
+        self.battle, self.rule, self.stage, self.result = metadata[1:5]
+        self.xpower = float(metadata[5]) if len(metadata) == 6 else None
         self.length = self._get_video_length()
 
     def _extract_metadata(self, file_base_name: str) -> List[str]:
         metadata = file_base_name.split("_")
-        if len(metadata) not in (4, 5):
+        if len(metadata) not in (5, 6):
             raise ValueError(f"Invalid file name format: {file_base_name}")
         return metadata
 
@@ -61,11 +62,11 @@ class UploadFile:
                 video.release()
 
     @classmethod
-    def make_file_base_name(cls, start: datetime.datetime, match: str, rule: str, result: str, xpower: Optional[float] = None) -> str:
+    def make_file_base_name(cls, start: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float] = None) -> str:
         # スケジュール毎に結合できるよう、録画開始日時(バトル開始日時)、マッチ、ルールをファイル名に含める
         # 動画説明に各試合の結果を記載するため、結果もファイル名に含める
         start_str = start.strftime(cls.DATETIME_FORMAT)
-        file_base_name = f"{start_str}_{match}_{rule}_{result}"
+        file_base_name = f"{start_str}_{match}_{rule}_{stage}_{result}"
         if xpower:
             file_base_name += f"_{xpower}"
         return file_base_name
@@ -92,9 +93,9 @@ class Uploader:
     ]
 
     @staticmethod
-    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, result: str, xpower: Optional[float] = None):
+    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float] = None):
         new_file_base_name = UploadFile.make_file_base_name(
-            start_datetime, match, rule, result, xpower)
+            start_datetime, match, rule, stage, result, xpower)
         _, extension = os.path.splitext(os.path.basename(path))
         new_path = os.path.join(Uploader.RECORDED_DIR,
                                 new_file_base_name + extension)
@@ -193,7 +194,7 @@ class Uploader:
 
             elapsed_time_str = self._timedelta_to_str(
                 datetime.timedelta(seconds=elapsed_time))
-            description += f"{elapsed_time_str} {file.result}\n"
+            description += f"{elapsed_time_str} {file.result} {file.stage} \n"
             elapsed_time += file.length
 
         if max_xpower and min_xpower:

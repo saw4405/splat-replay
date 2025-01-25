@@ -220,11 +220,13 @@ class Recorder(GracefulThread):
         logger.info(f"マッチ: {match}")
         rule = self._analyzer.rule_name(frame) or ""
         logger.info(f"ルール: {rule}")
+        stage = self._analyzer.stage_name(frame) or ""
+        logger.info(f"ステージ: {stage}")
 
         # アップロードキューに追加
         start_datetime = self._matching_start_time or \
             Obs.get_start_datetime(path)
-        Uploader.queue(path, start_datetime, match, rule,
+        Uploader.queue(path, start_datetime, match, rule, stage,
                        self._battle_result, self._x_power.get(rule, None))
         logger.info("アップロードキューに追加しました")
 

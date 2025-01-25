@@ -55,6 +55,32 @@ class Analyzer:
             "ガチヤグラ": "yagura.png",
             "ガチアサリ": "asari.png"
         })
+        self._stage_matchers = create_template_matchers({
+            "海女美術大学": "amabi.png",
+            "バイガイ亭": "baigai.png",
+            "ゴンズイ地区": "gonzui.png",
+            "ヒラメが丘団地": "hirame.png",
+            "カジキ空港": "kajiki.png",
+            "キンメダイ美術館": "kinme.png",
+            "コンブトラック": "konbu.png",
+            "クサヤ温泉": "kusaya.png",
+            "マヒマヒリゾート&スパ": "mahimahi.png",
+            "マンタマリア号": "manta.png",
+            "マサバ海峡大橋": "masaba.png",
+            "マテガイ放水路": "mategai.png",
+            "ナメロウ金属": "namero.png",
+            "ナンプラー遺跡": "nanpura-.png",
+            "ネギトロ炭鉱": "negitoro.png",
+            "オヒョウ海運": "ohyo.png",
+            "リュウグウターミナル": "ryugu.png",
+            "スメーシーワールド": "sume-shi-.png",
+            "タカアシ経済特区": "takaashi.png",
+            "タラポートショッピングパーク": "tarapo.png",
+            "チョウザメ造船": "chouzame.png",
+            "ヤガラ市場": "yagara.png",
+            "ユノハナ大渓谷": "yunohana.png",
+            "ザトウマーケット": "zatou.png",
+        })
         self._xp_machers_dictionary = {
             Rectangle(1730, 190, 1880, 240): create_template_matchers({
                 "ガチホコ": "xp_hoko1.png",
@@ -125,6 +151,9 @@ class Analyzer:
     def rule_name(self, image: np.ndarray) -> Optional[str]:
         return self._find(image, self._rule_matchers)
 
+    def stage_name(self, image: np.ndarray) -> Optional[str]:
+        return self._find(image, self._stage_matchers)
+
     def x_power(self, image: np.ndarray) -> Optional[Tuple[str, float]]:
         if not self._select_xmatch_matcher.match(image):
             return None
@@ -134,7 +163,6 @@ class Analyzer:
             match_name = self._find(image, matchers)
             if match_name is None:
                 continue
-            logger.info(f"XP読み取ります: {match_name}")
 
             # OCRで読み取るようにXP表示部のみ切り取る
             xp_image = image[rect.y1:rect.y2, rect.x1:rect.x2]
