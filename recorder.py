@@ -41,6 +41,8 @@ class Recorder(GracefulThread):
         self._record_start_time = time.time()
         self._last_power_check_time = time.time()
         self._screen_off_count = 0
+        self._should_resume_recording: Optional[Callable[[
+            np.ndarray], bool]] = None
 
         self._power_off_callback: Optional[Callable[[], None]] = None
 
@@ -149,6 +151,13 @@ class Recorder(GracefulThread):
 
         # 勝敗判定
         if self._battle_result is None:
+            # Finish!表示中は録画を一時停止する
+            if self._analyzer.battle_finish(frame):
+                self._should_resume_recording = lambda frame: not self._analyzer.battle_result_latter_half(
+                    frame)
+                self._pause_record()
+                return RecordStatus.PAUSE
+
             self._battle_result = self._analyzer.battle_result(frame)
             if self._battle_result:
                 logger.info(f"バトル結果: {self._battle_result}")
@@ -156,6 +165,7 @@ class Recorder(GracefulThread):
 
         # ローディング中は録画を一時停止する
         if self._analyzer.loading(frame):
+            self._should_resume_recording = self._analyzer.loading
             self._pause_record()
             return RecordStatus.PAUSE
 
@@ -167,7 +177,10 @@ class Recorder(GracefulThread):
         return RecordStatus.RECORD
 
     def _handle_pause_status(self, frame: np.ndarray) -> RecordStatus:
-        if not self._analyzer.loading(frame):
+        if self._should_resume_recording is None:
+            raise Exception("resume_check_callbackが設定されていません")
+
+        if not self._should_resume_recording(frame):
             self._resume_record()
             return RecordStatus.RECORD
 
