@@ -75,22 +75,6 @@
 
 4. `.example.env`を`.env`にリネームし、OBSのWebSocketのパスワード等を設定する
 
-5. `templates`フォルダに画像認識するためのテンプレート画像を保存する
-   (`templates(sample)`フォルダ内の画像を参考にしてください)
-  
-    1. OBSを起動した状態でバトルをする
-    2. 判定に使用する画面のスクリーンショットをとる
-       * Xマッチ選択時の画面
-         * `select_xmatch.png`、`xp_area1.png`、`xp_asari1.png`、`xp_hoko1.png`、`xp_yagura1.png`
-       * マッチング中の画面
-         * `matching.png`
-       * バトル開始時に敵・味方のプレートが表示されている画面
-         * `start.png`
-       * バトル終了時に勝敗判定をしている画面
-         * `win.png`、`lose.png`
-       * バトル終了後に自分のキルレや表彰が表示されている画面
-         * `stop.png`、`regular.png`、`bankara_challenge.png`、`bankara_open.png`、`x.png`、`nawabari.png`、`area.png`、`asari.png`、`hoko.png`、`yagura.png`
-    3. トリミングする
 
 ### 録画手順
 
