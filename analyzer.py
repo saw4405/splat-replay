@@ -91,8 +91,10 @@ class Analyzer:
         }
         self._select_xmatch_matcher = HSVMatcher(
             (80, 255, 250), (90, 255, 255), get_full_path("select_xmatch_mask.png"))
-        self._finish_matcher = HSVMatcher(
-            (0, 0, 0), (180, 255, 50), get_full_path("finish_mask.png"))
+        self._finish_text_matcher = HSVMatcher(
+            (0, 0, 0), (179, 255, 50), get_full_path("finish_text_mask.png"))
+        self._finish_band_matcher = HSVMatcher(
+            (0, 0, 50), (179, 255, 255), get_full_path("finish_band_mask.png"))
         self._virtual_camera_off_matcher = HashMatcher(
             get_full_path("virtual_camera_off.png"))
 
@@ -118,10 +120,8 @@ class Analyzer:
         return self._start_matcher.match(image)
 
     def battle_finish(self, image: np.ndarray) -> bool:
-        # Finish!の黒文字で判定するため、画面が黒いと誤検知してしまうため、黒画像は除外
-        if self.black_screen(image):
-            return False
-        return self._finish_matcher.match(image)
+        # 全体が黒いときに誤判定しないよう、Finishの帯が黒色でないことも確認する
+        return self._finish_text_matcher.match(image) & self._finish_band_matcher.match(image)
 
     def battle_stop(self, image: np.ndarray) -> bool:
         return self._stop_matcher.match(image)
@@ -140,7 +140,7 @@ class Analyzer:
 
     def battle_result_latter_half(self, image: np.ndarray) -> bool:
         # 後半の勝敗表示画面は右上が黒い
-        right_top_image = image[0:200, 1720:1920]
+        right_top_image = image[0:100, 1820:1920]
         if not self.black_screen(right_top_image):
             return False
         return self.battle_result(image) != None

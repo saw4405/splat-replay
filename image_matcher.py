@@ -19,7 +19,7 @@ class BaseMatcher(ABC):
 
 
 class TemplateMatcher(BaseMatcher):
-    def __init__(self, template_path: str, mask_path: Optional[str] = None, threshold: float = 0.99):
+    def __init__(self, template_path: str, mask_path: Optional[str] = None, threshold: float = 0.9):
         """
         テンプレートマッチングを行うクラス。
 
