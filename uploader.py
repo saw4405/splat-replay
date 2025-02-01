@@ -175,9 +175,9 @@ class Uploader:
 
         for file in files:
             # タイトルに付けるため、勝敗数をカウント
-            if "WIN" in file.result:
+            if file.result == "WIN":
                 win_count += 1
-            elif "LOSE" in file.result:
+            elif file.result == "LOSE":
                 lose_count += 1
 
             if file.xpower:
@@ -194,7 +194,8 @@ class Uploader:
 
             elapsed_time_str = self._timedelta_to_str(
                 datetime.timedelta(seconds=elapsed_time))
-            description += f"{elapsed_time_str} {file.result} {file.stage} \n"
+            description += f"{elapsed_time_str} {
+                file.result.ljust(4)} {file.stage} \n"
             elapsed_time += file.length
 
         if max_xpower and min_xpower:

@@ -39,8 +39,8 @@ class Analyzer:
         self._stop_matcher = TemplateMatcher(get_full_path("stop.png"))
         self._abort_matcher = TemplateMatcher(get_full_path("abort.png"))
         self._result_matchers = create_template_matchers({
-            "WIN!": "win.png",
-            "LOSE...": "lose.png"
+            "WIN": "win.png",
+            "LOSE": "lose.png"
         })
         self._match_matchers = create_template_matchers({
             "レギュラーマッチ": "regular.png",
