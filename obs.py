@@ -57,8 +57,7 @@ class Obs:
             return None
 
         os.chdir(self.DIRECTORY)
-        self._process = subprocess.Popen(
-            self.FILE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self._process = subprocess.Popen(self.FILE)
         logger.info("OBSを起動しました")
 
         # 起動直後はWebSocket接続に失敗するので起動待ちする
