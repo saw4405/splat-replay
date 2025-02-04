@@ -113,26 +113,20 @@ class Uploader:
         total_seconds = int(delta.total_seconds())
         hours, remainder = divmod(total_seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
-        formatted_time = f"{hours:02}:{minutes:02}:{seconds:02}"
-        return formatted_time
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
 
     def _get_upload_files(self) -> List[UploadFile]:
-        upload_files: List[UploadFile] = []
         files = glob.glob(f'{self.RECORDED_DIR}/*.*')
-        for path in files:
-            upload_file = UploadFile(path)
-            upload_files.append(upload_file)
-        return upload_files
+        return [UploadFile(path) for path in files]
 
     def _split_by_time_ranges(self, upload_files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
         time_scheduled_files = defaultdict(list)
-
         for upload_file in upload_files:
             file_datetime = upload_file.start
             file_date = file_datetime.date()
             file_time = file_datetime.time()
 
-            for _, (schedule_start_time, schedule_end_time) in enumerate(self.TIME_RANGES):
+            for schedule_start_time, schedule_end_time in self.TIME_RANGES:
                 # 日をまたがない時間帯 (1:00-23:00)
                 if schedule_start_time < schedule_end_time:
                     # スケジュールに該当する場合
@@ -159,10 +153,9 @@ class Uploader:
         # ファイルが一つの場合は結合する必要がないのでリネーム＆移動
         if len(files) == 1:
             shutil.copyfile(files[0].path, output_path)
-            return
-
-        file_names = [file.path for file in files]
-        FFmpeg.concat(file_names, output_path)
+        else:
+            file_names = [file.path for file in files]
+            FFmpeg.concat(file_names, output_path)
 
     def _generate_title_and_description(self, files: List[UploadFile], day: datetime.date, time: datetime.time, battle: str, rule: str) -> Tuple[str, str]:
         description = ""
@@ -235,10 +228,10 @@ class Uploader:
 
     def upload(self):
         logger.info("アップロード処理を開始します")
+
+        # 時間帯ごとにファイルを結合する
         upload_files = self._get_upload_files()
         time_scheduled_files = self._split_by_time_ranges(upload_files)
-
-        # 時間帯ごとにファイルを結合してアップロード
         for key, files in time_scheduled_files.items():
             day, time, battle, rule = key
 
@@ -251,12 +244,21 @@ class Uploader:
             title, description = self._generate_title_and_description(
                 files, day, time, battle, rule)
 
+            FFmpeg.write_metadata(path, FFmpeg.Metadata(title, description))
+            if not self._delete_files([file.path for file in files]):
+                logger.warning(
+                    "結合前のファイル削除に失敗したため、結合後のファイルが再度アップロードされる可能性があります")
+
+        # PENDING_DIRにあるファイルをアップロードする
+        files = glob.glob(f'{self.PENDING_DIR}/*.*')
+        for path in files:
+            metadata = FFmpeg.read_metadata(path)
             logger.info(f"YouTubeにアップロードします: {title}")
-            res = self._youtube.upload(path, title, description)
+            res = self._youtube.upload(
+                path, metadata.title, metadata.comment)
             if res:
                 logger.info("YouTubeにアップロードしました")
-                delete_files = [path] + [file.path for file in files]
-                if not self._delete_files(delete_files):
+                if not self._delete_files([path]):
                     logger.warning(
                         "アップロード後のファイル削除に失敗したため、同じファイルが再度アップロードされる可能性があります")
             else:
