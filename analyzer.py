@@ -4,6 +4,7 @@ from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
 import logging
 
+import cv2
 import numpy as np
 
 from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher
@@ -154,6 +155,11 @@ class Analyzer:
     def stage_name(self, image: np.ndarray) -> Optional[str]:
         return self._find(image, self._stage_matchers)
 
+    def _rotate_image(self, image: np.ndarray, angle: float) -> np.ndarray:
+        rows, cols = image.shape[:2]
+        M = cv2.getRotationMatrix2D((cols/2, rows/2), angle, 1)
+        return cv2.warpAffine(image, M, (cols, rows))
+
     def x_power(self, image: np.ndarray) -> Optional[Tuple[str, float]]:
         if not self._select_xmatch_matcher.match(image):
             return None
@@ -164,8 +170,9 @@ class Analyzer:
             if match_name is None:
                 continue
 
-            # OCRで読み取るようにXP表示部のみ切り取る
+            # OCRで読み取るようにXP表示部のみ切り取る (精度向上のため、4度回転させて文字を水平にする)
             xp_image = image[rect.y1:rect.y2, rect.x1:rect.x2]
+            xp_image = self._rotate_image(xp_image, -4)
             xp_str = self._ocr.get_text(xp_image).strip()
 
             try:
