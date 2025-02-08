@@ -88,6 +88,44 @@ class HSVMatcher(BaseMatcher):
         return color_ratio >= self._threshold
 
 
+class RGBMatcher(BaseMatcher):
+    def __init__(self, rgb: np.ndarray, mask_path: Optional[str] = None, threshold: float = 0.9):
+        """
+        RGB色空間での色の一致を検出するクラス。
+
+        :param rgb: 赤、緑、青の値。
+        :param mask_path: マスク画像のパス（オプション）。
+        :param threshold: 一致とみなす割合の閾値（0.0〜1.0）。
+        """
+        super().__init__(mask_path)
+        self._rgb = rgb
+        self._threshold = threshold
+
+    def match(self, image: np.ndarray) -> bool:
+        """
+        イメージ内で色の一致を検出する。
+
+        :param image: 検索対象のイメージ。
+        :return: 一致したかどうか。
+        """
+
+        if self._mask is not None:
+            mask = self._mask == 255
+            masked_image = image[mask]
+        else:
+            masked_image = image.reshape(-1, 3)
+            mask = np.ones(image.shape[:2], dtype=bool)
+
+        match_pixels = np.all(masked_image == self._rgb, axis=-1)
+        match_count = np.sum(match_pixels)
+
+        total_masked_pixels = np.sum(mask)
+        if total_masked_pixels == 0:
+            return False
+        match_ratio = match_count / total_masked_pixels
+        return match_ratio >= self._threshold
+
+
 class HashMatcher(BaseMatcher):
     def __init__(self, image_path: str):
         """

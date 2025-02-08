@@ -4,6 +4,7 @@ import time
 import datetime
 import subprocess
 from typing import Optional, Tuple
+import win32gui
 
 import psutil
 from obswebsocket import obsws, requests
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class Obs:
     @staticmethod
-    def get_start_datetime(path: str) -> Optional[datetime.datetime]:
+    def extract_start_datetime(path: str) -> Optional[datetime.datetime]:
         try:
             file_base_name, _ = os.path.splitext(os.path.basename(path))
             start_datetime = datetime.datetime.strptime(
@@ -43,14 +44,6 @@ class Obs:
         self._start_obs_process()
         self._connect_obs()
 
-    def _connect_obs(self):
-        if self._ws is None:
-            self._ws = obsws(self.HOST, self.PORT, self.PASSWORD)
-
-        if not self._ws.ws or not self._ws.ws.connected:
-            self._ws.connect()
-            logger.info("OBS WebSocketに接続しました")
-
     def _start_obs_process(self):
         if self._is_running():
             logger.info("OBSは既に起動しています")
@@ -63,13 +56,33 @@ class Obs:
         # 起動直後はWebSocket接続に失敗するので起動待ちする
         while not self._is_running():
             time.sleep(1)
-        time.sleep(5)
+
+    def _connect_obs(self):
+        if self._ws is None:
+            self._ws = obsws(self.HOST, self.PORT, self.PASSWORD)
+
+        if not self._ws.ws or not self._ws.ws.connected:
+            self._ws.connect()
+            logger.info("OBS WebSocketに接続しました")
 
     def _is_running(self) -> bool:
-        for proc in psutil.process_iter(['name']):
-            if proc.info['name'] == self.FILE:
-                return True
-        return False
+        def exists_process() -> bool:
+            for proc in psutil.process_iter(['name']):
+                if proc.info['name'] == self.FILE:
+                    return True
+            return False
+
+        def exists_window() -> bool:
+            def enum_window(hwnd, result):
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd)
+                    if "OBS" in title:
+                        result.append(hwnd)
+            windows = []
+            win32gui.EnumWindows(enum_window, windows)
+            return bool(windows)
+
+        return exists_process() and exists_window()
 
     def close(self):
         self.stop_virtual_cam()

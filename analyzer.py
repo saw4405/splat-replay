@@ -7,7 +7,7 @@ import logging
 import cv2
 import numpy as np
 
-from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher
+from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, RGBMatcher
 from ocr import OCR
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,16 @@ class Analyzer:
         self._matching_matcher = TemplateMatcher(get_full_path("matching.png"))
         self._wait_matcher = TemplateMatcher(get_full_path("wait.png"))
         self._start_matcher = TemplateMatcher(get_full_path("start.png"))
-        self._stop_matcher = TemplateMatcher(get_full_path("stop.png"))
+        self._stop_matcher = TemplateMatcher(
+            get_full_path("stop.png"), threshold=0.95)
+        self._stop_message_matcher = HSVMatcher(
+            (0, 0, 200), (179, 20, 255), get_full_path("stop_mask.png"))
+        self._stop_icon_matcher = HSVMatcher(
+            (0, 0, 200), (179, 20, 255), get_full_path("stop_icon_mask.png"))
+        self._stop_gear_matcher = HSVMatcher(
+            (0, 0, 0), (179, 255, 50), get_full_path("stop_gear_mask.png"))
+        self._stop_background_mask = RGBMatcher(
+            (28, 28, 28), get_full_path("stop_background_mask.png"))
         self._abort_matcher = TemplateMatcher(get_full_path("abort.png"))
         self._result_matchers = create_template_matchers({
             "WIN": "win.png",
@@ -125,7 +134,9 @@ class Analyzer:
         return self._finish_text_matcher.match(image) & self._finish_band_matcher.match(image)
 
     def battle_stop(self, image: np.ndarray) -> bool:
-        return self._stop_matcher.match(image)
+        # リザルト画面をサムネイルのベースに使用するため、厳密に判定する
+        # 「ゲットした表彰」という文字がある。キャラクターアイコンが表示されている。ギア名が表示されている。ローディング画面が表示されていない。
+        return self._stop_message_matcher.match(image) and not self._stop_icon_matcher.match(image) and not self._stop_gear_matcher.match(image) and self._stop_background_mask.match(image)
 
     def battle_abort(self, image: np.ndarray) -> bool:
         return self._abort_matcher.match(image)

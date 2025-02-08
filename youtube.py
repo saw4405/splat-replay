@@ -60,7 +60,7 @@ class Youtube:
         self._save_credentials(credentials)
         return credentials
 
-    def upload(self, path: str, title: str, description: str, category: int = 20, privacy_status: PrivacyStatus = 'private') -> bool:
+    def upload(self, path: str, title: str, description: str, category: int = 20, privacy_status: PrivacyStatus = 'private') -> Optional[str]:
         media_file = None
         try:
             # Specify the file to upload
@@ -88,6 +88,34 @@ class Youtube:
 
             logger.info(f'Video "{title}" uploaded successfully!')
             logger.info(f'Video ID: {response["id"]}')
+            return response["id"]
+        except google.auth.exceptions.GoogleAuthError as e:
+            logger.info(f"Authentication failed: {e}")
+            return None
+        except Exception as e:
+            logger.info(f"An error occurred: {e}")
+            return None
+        finally:
+            if media_file:
+                del media_file
+                gc.collect()
+
+    def set_thumbnail(self, video_id: str, image_path: str) -> bool:
+        media_file = None
+        try:
+            # Specify the file to upload
+            media_file = MediaFileUpload(image_path)
+
+            # Call the API's thumbnails.set method to upload the thumbnail
+            request = self._youtube.thumbnails().set(
+                videoId=video_id,
+                media_body=media_file
+            )
+
+            # Upload the thumbnail
+            request.execute()
+
+            logger.info(f'Thumbnail uploaded successfully!')
             return True
         except google.auth.exceptions.GoogleAuthError as e:
             logger.info(f"Authentication failed: {e}")

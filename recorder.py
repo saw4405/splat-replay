@@ -12,6 +12,7 @@ from uploader import Uploader
 from capture import Capture
 from analyzer import Analyzer
 from graceful_thread import GracefulThread
+import utility.os as os_utility
 
 logger = logging.getLogger(__name__)
 
@@ -206,10 +207,8 @@ class Recorder(GracefulThread):
 
         self._matching_start_time = None
 
-        try:
-            os.remove(path)
-        except Exception as e:
-            logger.warning(f"中断された録画ファイルの削除に失敗しました: {e}")
+        if os_utility.remove_file(path).is_err():
+            logger.warning(f"中断された録画ファイルの削除に失敗しました")
 
     def _stop_record(self, frame: np.ndarray):
         logger.info("録画を停止します")
@@ -225,9 +224,9 @@ class Recorder(GracefulThread):
 
         # アップロードキューに追加
         start_datetime = self._matching_start_time or \
-            Obs.get_start_datetime(path)
+            Obs.extract_start_datetime(path)
         Uploader.queue(path, start_datetime, match, rule, stage,
-                       self._battle_result, self._x_power.get(rule, None))
+                       self._battle_result, self._x_power.get(rule, None), frame)
         logger.info("アップロードキューに追加しました")
 
         self._matching_start_time = None

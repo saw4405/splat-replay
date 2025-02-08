@@ -3,73 +3,19 @@ import logging
 import shutil
 import glob
 import datetime
-from collections import defaultdict
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
 import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from youtube import Youtube
 from ffmpeg import FFmpeg
+from upload_file import UploadFile
+import utility.os as os_utility
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class UploadFile:
-    DATETIME_FORMAT = "%Y-%m-%d %H-%M-%S"
-
-    path: str
-    file_name: str
-    extension: str
-    start: datetime.datetime
-    battle: str
-    rule: str
-    stage: str
-    result: str
-    xpower: Optional[float]
-    length: float
-
-    def __init__(self, path):
-        self.path = path
-        self.file_name = os.path.basename(path)
-        file_base_name, self.extension = os.path.splitext(self.file_name)
-
-        metadata = self._extract_metadata(file_base_name)
-        self.start = datetime.datetime.strptime(
-            metadata[0], self.DATETIME_FORMAT)
-        self.battle, self.rule, self.stage, self.result = metadata[1:5]
-        self.xpower = float(metadata[5]) if len(metadata) == 6 else None
-        self.length = self._get_video_length()
-
-    def _extract_metadata(self, file_base_name: str) -> List[str]:
-        metadata = file_base_name.split("_")
-        if len(metadata) not in (5, 6):
-            raise ValueError(f"Invalid file name format: {file_base_name}")
-        return metadata
-
-    def _get_video_length(self) -> float:
-        video = None
-        try:
-            video = cv2.VideoCapture(self.path)
-            length = video.get(cv2.CAP_PROP_FRAME_COUNT) / \
-                video.get(cv2.CAP_PROP_FPS)
-            return length
-        except Exception as e:
-            raise e
-        finally:
-            if video:
-                video.release()
-
-    @classmethod
-    def make_file_base_name(cls, start: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float] = None) -> str:
-        # スケジュール毎に結合できるよう、録画開始日時(バトル開始日時)、マッチ、ルールをファイル名に含める
-        # 動画説明に各試合の結果を記載するため、結果もファイル名に含める
-        start_str = start.strftime(cls.DATETIME_FORMAT)
-        file_base_name = f"{start_str}_{match}_{rule}_{stage}_{result}"
-        if xpower:
-            file_base_name += f"_{xpower}"
-        return file_base_name
 
 
 class Uploader:
@@ -77,6 +23,8 @@ class Uploader:
         os.path.dirname(__file__), "videos", "recorded")
     PENDING_DIR = os.path.join(os.path.dirname(
         __file__), "videos", "upload_pending")
+    THUMBNAIL_ASSETS_DIR = os.path.join(
+        os.path.dirname(__file__), "thumbnail_assets")
     TIME_RANGES = [
         (datetime.time(1, 0), datetime.time(3, 0)),
         (datetime.time(3, 0), datetime.time(5, 0)),
@@ -93,13 +41,21 @@ class Uploader:
     ]
 
     @staticmethod
-    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float] = None):
+    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float], result_image: Optional[np.ndarray]):
+        # リザルト画像がある場合、サムネイル画像として動画に付与する
+        if result_image is not None:
+            image_path = os.path.splitext(path)[0] + ".png"
+            cv2.imwrite(image_path, result_image)
+            FFmpeg.set_thumbnail(path, image_path)
+            os_utility.remove_file(image_path)
+
+        # 動画を規定の場所に移動(キューに追加)
         new_file_base_name = UploadFile.make_file_base_name(
             start_datetime, match, rule, stage, result, xpower)
         _, extension = os.path.splitext(os.path.basename(path))
         new_path = os.path.join(Uploader.RECORDED_DIR,
                                 new_file_base_name + extension)
-        os.rename(path, new_path)
+        os_utility.rename_file(path, new_path)
 
     def __init__(self):
         super().__init__()
@@ -115,56 +71,12 @@ class Uploader:
         minutes, seconds = divmod(remainder, 60)
         return f"{hours:02}:{minutes:02}:{seconds:02}"
 
-    def _get_upload_files(self) -> List[UploadFile]:
-        files = glob.glob(f'{self.RECORDED_DIR}/*.*')
-        return [UploadFile(path) for path in files]
-
-    def _split_by_time_ranges(self, upload_files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
-        time_scheduled_files = defaultdict(list)
-        for upload_file in upload_files:
-            file_datetime = upload_file.start
-            file_date = file_datetime.date()
-            file_time = file_datetime.time()
-
-            for schedule_start_time, schedule_end_time in self.TIME_RANGES:
-                # 日をまたがない時間帯 (1:00-23:00)
-                if schedule_start_time < schedule_end_time:
-                    # スケジュールに該当する場合
-                    if schedule_start_time <= file_time < schedule_end_time:
-                        key = (file_date, schedule_start_time,
-                               upload_file.battle, upload_file.rule)
-                        time_scheduled_files[key].append(upload_file)
-                        break
-
-                # 日をまたぐ時間帯 (23:00-1:00)
-                else:
-                    # スケジュールに該当する場合
-                    if file_time >= schedule_start_time or file_time < schedule_end_time:
-                        # 日をまたぐ場合は1:00を含む日付に調整
-                        adjusted_date = file_date if file_time >= schedule_start_time else file_date - \
-                            datetime.timedelta(days=1)
-                        key = (adjusted_date, schedule_start_time,
-                               upload_file.battle, upload_file.rule)
-                        time_scheduled_files[key].append(upload_file)
-                        break
-        return time_scheduled_files
-
-    def _concat_files(self, files: List[UploadFile], output_path: str):
-        # ファイルが一つの場合は結合する必要がないのでリネーム＆移動
-        if len(files) == 1:
-            shutil.copyfile(files[0].path, output_path)
-        else:
-            file_names = [file.path for file in files]
-            FFmpeg.concat(file_names, output_path)
-
     def _generate_title_and_description(self, files: List[UploadFile], day: datetime.date, time: datetime.time, battle: str, rule: str) -> Tuple[str, str]:
         description = ""
         elapsed_time = 0
         win_count = 0
         lose_count = 0
         last_xpower = 0.0
-        max_xpower: Optional[float] = None
-        min_xpower: Optional[float] = None
 
         for file in files:
             # タイトルに付けるため、勝敗数をカウント
@@ -173,17 +85,10 @@ class Uploader:
             elif file.result == "LOSE":
                 lose_count += 1
 
-            if file.xpower:
-                # タイトルにつけるため、最大と最小のXパワーを取得
-                max_xpower = max(
-                    max_xpower, file.xpower) if max_xpower is not None else file.xpower
-                min_xpower = min(
-                    min_xpower, file.xpower) if min_xpower is not None else file.xpower
-
-                # Xパワーの変動があったタイミングだけ説明にXパワーを記載
-                if last_xpower != file.xpower:
-                    description += f"XP: {file.xpower}\n"
-                    last_xpower = file.xpower
+            # Xパワーの変動があったタイミングだけ説明にXパワーを記載
+            if file.xpower and last_xpower != file.xpower:
+                description += f"XP: {file.xpower}\n"
+                last_xpower = file.xpower
 
             elapsed_time_str = self._timedelta_to_str(
                 datetime.timedelta(seconds=elapsed_time))
@@ -191,22 +96,23 @@ class Uploader:
                 file.result.ljust(4)} {file.stage} \n"
             elapsed_time += file.length
 
-        if max_xpower and min_xpower:
-            if max_xpower == min_xpower:
-                xpower = f"({max_xpower})"
-            else:
-                common_prefix_length = 0
-                min_xpower_str = str(min_xpower)
-                max_xpower_str = str(max_xpower)
-                for i in range(min(len(min_xpower_str), len(max_xpower_str))):
-                    if min_xpower_str[i] == max_xpower_str[i]:
-                        common_prefix_length += 1
-                    else:
-                        break
-                xpower = f"({
-                    min_xpower_str}-{max_xpower_str[common_prefix_length:]})"
-        else:
+        xpowers = [file.xpower for file in files if file.xpower]
+        max_xpower = max(xpowers) if len(xpowers) > 0 else None
+        min_xpower = min(xpowers) if len(xpowers) > 0 else None
+        if len(xpowers) == 0:
             xpower = ""
+        elif max_xpower == min_xpower:
+            xpower = f"({max_xpower})"
+        else:
+            common_length = 0
+            min_xpower_str = str(min_xpower)
+            max_xpower_str = str(max_xpower)
+            for i in range(min(len(min_xpower_str), len(max_xpower_str))):
+                if min_xpower_str[i] == max_xpower_str[i]:
+                    common_length += 1
+                else:
+                    break
+            xpower = f"({min_xpower_str}-{max_xpower_str[common_length:]})"
 
         day_str = day.strftime("'%y.%m.%d")
         time_str = time.strftime("%H").lstrip("0")
@@ -215,23 +121,11 @@ class Uploader:
             xpower} {rule} {win_count}勝{lose_count}敗"
         return title, description
 
-    def _delete_files(self, files: List[str]) -> bool:
-        result = True
-        for file in files:
-            try:
-                os.remove(file)
-            except Exception as e:
-                logger.error(f"ファイルの削除に失敗しました: {e}\n{file}")
-                result = False
-
-        return result
-
-    def upload(self):
-        logger.info("アップロード処理を開始します")
-
-        # 時間帯ごとにファイルを結合する
-        upload_files = self._get_upload_files()
-        time_scheduled_files = self._split_by_time_ranges(upload_files)
+    def _concat_videos_by_time_range(self):
+        files = glob.glob(f'{self.RECORDED_DIR}/*.*')
+        recorded_video_files = [UploadFile(path) for path in files]
+        time_scheduled_files = UploadFile.split_by_time_ranges(
+            recorded_video_files, self.TIME_RANGES)
         for key, files in time_scheduled_files.items():
             day, time, battle, rule = key
 
@@ -240,30 +134,138 @@ class Uploader:
                 "%Y-%m-%d")}_{time.strftime("%H")}_{battle}_{rule}{extension}"
             path = os.path.join(self.PENDING_DIR, file_name)
 
-            self._concat_files(files, path)
+            if len(files) == 1:
+                shutil.copyfile(files[0].path, path)
+            else:
+                file_names = [file.path for file in files]
+                FFmpeg.concat(file_names, path)
+
             title, description = self._generate_title_and_description(
                 files, day, time, battle, rule)
-
             FFmpeg.write_metadata(path, FFmpeg.Metadata(title, description))
-            if not self._delete_files([file.path for file in files]):
+
+            thumnail_path = os.path.splitext(path)[0] + ".png"
+            thumnail_path = self._create_thumbnail(thumnail_path, files)
+            if thumnail_path and os.path.exists(thumnail_path):
+                FFmpeg.set_thumbnail(path, thumnail_path)
+                os_utility.remove_file(thumnail_path)
+
+            if any(os_utility.remove_file(file.path).is_err() for file in files):
                 logger.warning(
                     "結合前のファイル削除に失敗したため、結合後のファイルが再度アップロードされる可能性があります")
 
-        # PENDING_DIRにあるファイルをアップロードする
+    def _create_thumbnail(self, thumnail_path: str, files: List[UploadFile]) -> Optional[str]:
+        for file in files:
+            if FFmpeg.has_thumbnail(file.path) and FFmpeg.get_thumbnail(file.path, thumnail_path):
+                break
+        if not os.path.exists(thumnail_path):
+            return None
+
+        battle = files[0].battle
+        rule = files[0].rule
+        xpowers = [file.xpower for file in files if file.xpower]
+        min_xpower = min(xpowers) if len(xpowers) > 0 else None
+        max_xpower = max(xpowers) if len(xpowers) > 0 else None
+        rate = None if min_xpower is None else \
+            f"XP: {min_xpower}" if min_xpower == max_xpower else \
+            f"XP: {min_xpower} ~ {max_xpower}"
+        stages = [file.stage for file in files]
+        stages = list(dict.fromkeys(stages))
+        stage1 = stages[0] if len(stages) > 0 else None
+        stage2 = stages[1] if len(stages) > 1 else None
+
+        self._design_thumbnail(
+            thumnail_path, battle, rule, rate, stage1, stage2)
+        return thumnail_path
+
+    def _design_thumbnail(self, thumbnail_path: str, battle: str, rule: str, rate: Optional[str], stage1: Optional[str], stage2: Optional[str]):
+        thumbnail = Image.open(thumbnail_path).convert("RGBA")
+        draw = ImageDraw.Draw(thumbnail)
+        # 不要なステージ部分を塗りつぶし
+        draw.rounded_rectangle((777, 21, 1849, 750), radius=40,
+                               fill=(28, 28, 28), outline=(28, 28, 28), width=1)
+
+        # バトルのアイコンを追加
+        path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{battle}.png")
+        if os.path.exists(path):
+            battle_image = Image.open(path).convert("RGBA")
+            battle_image = battle_image.resize((300, 300))
+            thumbnail.paste(battle_image, (800, 40), battle_image)
+        else:
+            logger.warning(f"バトルアイコンが見つかりません: {battle}")
+
+        # ルールの文字を追加
+        path = os.path.join(self.THUMBNAIL_ASSETS_DIR, "ikamodoki1.ttf")
+        font = ImageFont.truetype(path, 140)
+        draw.text((1120, 50), rule, fill="white", font=font)
+
+        # ルールのアイコンを追加
+        path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{rule}.png")
+        if os.path.exists(path):
+            rule_image = Image.open(path).convert("RGBA")
+            rule_image = rule_image.resize((150, 150))
+            thumbnail.paste(rule_image, (1660, 70), rule_image)
+        else:
+            logger.warning(f"ルールアイコンが見つかりません: {rule}")
+
+        # レートの文字を追加
+        if rate:
+            text_color = (1, 249, 196) if battle == "Xマッチ" else "white"
+            path = os.path.join(self.THUMBNAIL_ASSETS_DIR,
+                                "Paintball_Beta.otf")
+            font = ImageFont.truetype(path, 70)
+            draw.text((1125, 230), rate, fill=text_color, font=font)
+
+        # ステージ画像を追加
+        path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{stage1}.png")
+        if stage1 and os.path.exists(path):
+            stage1_image = Image.open(path).convert("RGBA")
+            stage1_image = stage1_image.resize((960, 168))
+            thumbnail.paste(stage1_image, (860, 360), stage1_image)
+        else:
+            logger.warning(f"ステージ画像が見つかりません: {stage1}")
+
+        path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{stage2}.png")
+        if stage2 and os.path.exists(path):
+            stage2_image = Image.open(path).convert("RGBA")
+            stage2_image = stage2_image.resize((960, 168))
+            thumbnail.paste(stage2_image, (860, 540), stage2_image)
+        else:
+            logger.warning(f"ステージ画像が見つかりません: {stage2}")
+
+        thumbnail.save(thumbnail_path)
+
+    def _upload_to_youtube(self):
         files = glob.glob(f'{self.PENDING_DIR}/*.*')
         for path in files:
             metadata = FFmpeg.read_metadata(path)
-            logger.info(f"YouTubeにアップロードします: {title}")
-            res = self._youtube.upload(
+            logger.info(f"YouTubeにアップロードします: {metadata.title}")
+            video_id = self._youtube.upload(
                 path, metadata.title, metadata.comment)
-            if res:
-                logger.info("YouTubeにアップロードしました")
-                if not self._delete_files([path]):
-                    logger.warning(
-                        "アップロード後のファイル削除に失敗したため、同じファイルが再度アップロードされる可能性があります")
-            else:
+            if not video_id:
                 logger.info("YouTubeへのアップロードに失敗しました")
+                continue
 
+            logger.info("YouTubeにアップロードしました")
+            try:
+                thumbnail_path = os.path.join(
+                    self.PENDING_DIR, f"{video_id}.png")
+                FFmpeg.get_thumbnail(path, thumbnail_path)
+                self._youtube.set_thumbnail(video_id, thumbnail_path)
+            except Exception as e:
+                logger.warning(f"サムネイルのアップロードに失敗しました: {e}")
+
+            if os_utility.remove_file(thumbnail_path).is_err():
+                logger.warning("サムネイルの削除に失敗しました")
+
+            if os_utility.remove_file(path).is_err():
+                logger.warning(
+                    "アップロード後のファイル削除に失敗したため、同じファイルが再度アップロードされる可能性があります")
+
+    def upload(self):
+        logger.info("アップロード処理を開始します")
+        self._concat_videos_by_time_range()
+        self._upload_to_youtube()
         logger.info("アップロード処理が完了しました")
 
 
