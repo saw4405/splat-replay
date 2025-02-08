@@ -1,0 +1,18 @@
+[project]
+name = "splat-replay"
+version = "0.1.0"
+description = "スプラトゥーン3のバトル動画を自動録画し、YouTubeにアップロードする"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "google-api-python-client>=2.160.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.2.1",
+    "obs-websocket-py>=1.0",
+    "opencv-python>=4.11.0.86",
+    "psutil>=6.1.1",
+    "pytesseract>=0.3.13",
+    "python-dotenv>=1.0.1",
+    "pywin32>=308",
+    "schedule>=1.2.2",
+]

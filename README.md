@@ -25,8 +25,9 @@
 ### 動作確認環境
 
 * Windows 11 23H2
-* OBS 30.2.3
-* Python 3.12.8
+* OBS 31.0.1
+* Python 3.13.2
+* uv 0.5.29 (ca73c4754 2025-02-05)
 * FFmpeg N-109468-gd39b34123d-20221230
 * tesseract v5.5.0.20241111
 
@@ -37,6 +38,7 @@
   * OBSのWebSocket機能を有効にしていること [[参考]](https://note.com/213414/n/nd9981ad5bb19)
   * 必要に応じてOBSの録画設定をしておくこと [[参考]](https://obsproject.com/kb/standard-recording-output-guide)
 * Pythonをインストールしていること
+* uvをインストールしていること [参考](https://docs.astral.sh/uv/getting-started/installation/#installation-methods)
 * YouTubeの認証情報を取得し、YouTubeAPIを有効化しておくこと [[参照]](https://qiita.com/ny7760/items/5a728fd9e7b40588237c)
   * 認証情報をjsonファイルとしてダウンロードしておく
   * 15分以上の動画をアップロードできるよう、YouTubeアカウントの確認を実施しておく [[参照]](https://www.howtonote.jp/youtube/movie/index4.html#google_vignette)
@@ -52,18 +54,22 @@
 ### 初回手順
 
 1. 本リポジトリをクローンする
+    ```bash
+    git clone https://github.com/saw4405/splat-replay.git
+    ```
 
 2. YouTubeの認証情報を`client_secrets.json`として保存する
 
-3. (必要に応じて)仮想環境を作成してアクティベートする
+3. 仮想環境を作成してアクティベートする
     ```bash
-    python 
+    uv venv
+    .venv\Scripts\activate
     ```
-
+    
 4. パッケージをインストールする
 
     ```bash
-    pip install -r requirements.txt
+    uv sync
     ```
 
     * `opencv-python`
@@ -80,7 +86,7 @@
         * 動画のアップロードを定期的にバッチ処理するために使用
     * `pytesseract`
         * XPの読み込み等でOCRを使うために使用
-    * `pywin32` pip install pypiwin32
+    * `pywin32`
         * キャプチャボードの接続確認のために使用
 
 5. `.example.env`を`.env`にリネームし、OBSのWebSocketのパスワード等を設定する
