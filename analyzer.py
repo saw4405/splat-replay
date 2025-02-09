@@ -56,14 +56,18 @@ class Analyzer:
             "レギュラーマッチ": "regular.png",
             "バンカラマッチ(チャレンジ)": "bankara_challenge.png",
             "バンカラマッチ(オープン)": "bankara_open.png",
-            "Xマッチ": "x.png"
+            "Xマッチ": "x.png",
+            "フェスマッチ(チャレンジ)": "fes_challenge.png",
+            "フェスマッチ(オープン)": "fes_open.png",
+            "トリカラマッチ": "torikara_match.png"
         })
         self._rule_matchers = create_template_matchers({
             "ナワバリ": "nawabari.png",
             "ガチホコ": "hoko.png",
             "ガチエリア": "area.png",
             "ガチヤグラ": "yagura.png",
-            "ガチアサリ": "asari.png"
+            "ガチアサリ": "asari.png",
+            "トリカラ": "torikara_battle.png"
         })
         self._stage_matchers = create_template_matchers({
             "海女美術大学": "amabi.png",
