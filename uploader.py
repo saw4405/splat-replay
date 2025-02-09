@@ -5,10 +5,12 @@ import glob
 import datetime
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
+from collections import defaultdict
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+import srt
 
 from youtube import Youtube
 from ffmpeg import FFmpeg
@@ -41,13 +43,17 @@ class Uploader:
     ]
 
     @staticmethod
-    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float], result_image: Optional[np.ndarray]):
-        # リザルト画像がある場合、サムネイル画像として動画に付与する
+    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float], result_image: Optional[np.ndarray], srt: Optional[str]):
+        # リザルト画像がある場合、サムネイル画像として動画に埋め込む
         if result_image is not None:
             image_path = os.path.splitext(path)[0] + ".png"
             cv2.imwrite(image_path, result_image)
             FFmpeg.set_thumbnail(path, image_path)
             os_utility.remove_file(image_path)
+
+        # 字幕を動画に埋め込む
+        if srt:
+            FFmpeg.set_subtitle(path, srt)
 
         # 動画を規定の場所に移動(キューに追加)
         new_file_base_name = UploadFile.make_file_base_name(
@@ -121,11 +127,40 @@ class Uploader:
             xpower} {rule} {win_count}勝{lose_count}敗"
         return title, description
 
+    def _split_by_time_ranges(self, files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
+        time_scheduled_files = defaultdict(list)
+        for file in files:
+            file_datetime = file.start
+            file_date = file_datetime.date()
+            file_time = file_datetime.time()
+
+            for schedule_start_time, schedule_end_time in self.TIME_RANGES:
+                # 日をまたがない時間帯 (1:00-23:00)
+                if schedule_start_time < schedule_end_time:
+                    # スケジュールに該当する場合
+                    if schedule_start_time <= file_time < schedule_end_time:
+                        key = (file_date, schedule_start_time,
+                               file.battle, file.rule)
+                        time_scheduled_files[key].append(file)
+                        break
+
+                # 日をまたぐ時間帯 (23:00-1:00)
+                else:
+                    # スケジュールに該当する場合
+                    if file_time >= schedule_start_time or file_time < schedule_end_time:
+                        # 日をまたぐ場合は1:00を含む日付に調整
+                        adjusted_date = file_date if file_time >= schedule_start_time else file_date - \
+                            datetime.timedelta(days=1)
+                        key = (adjusted_date, schedule_start_time,
+                               file.battle, file.rule)
+                        time_scheduled_files[key].append(file)
+                        break
+        return time_scheduled_files
+
     def _concat_videos_by_time_range(self):
         files = glob.glob(f'{self.RECORDED_DIR}/*.*')
         recorded_video_files = [UploadFile(path) for path in files]
-        time_scheduled_files = UploadFile.split_by_time_ranges(
-            recorded_video_files, self.TIME_RANGES)
+        time_scheduled_files = self._split_by_time_ranges(recorded_video_files)
         for key, files in time_scheduled_files.items():
             day, time, battle, rule = key
 
@@ -134,21 +169,38 @@ class Uploader:
                 "%Y-%m-%d")}_{time.strftime("%H")}_{battle}_{rule}{extension}"
             path = os.path.join(self.PENDING_DIR, file_name)
 
+            # 動画を結合する
             if len(files) == 1:
                 shutil.copyfile(files[0].path, path)
             else:
                 file_names = [file.path for file in files]
                 FFmpeg.concat(file_names, path)
 
+            # タイトルと説明を動画に埋め込む
             title, description = self._generate_title_and_description(
                 files, day, time, battle, rule)
             FFmpeg.write_metadata(path, FFmpeg.Metadata(title, description))
 
+            # サムネイル画像を作成して動画に埋め込む
             thumnail_path = os.path.splitext(path)[0] + ".png"
             thumnail_path = self._create_thumbnail(thumnail_path, files)
             if thumnail_path and os.path.exists(thumnail_path):
                 FFmpeg.set_thumbnail(path, thumnail_path)
                 os_utility.remove_file(thumnail_path)
+
+            # 字幕を結合して動画に埋め込む
+            combined_subtitles: List[srt.Subtitle] = []
+            offset = datetime.timedelta(seconds=0)
+            for file in files:
+                subtitles = file.srt
+                if subtitles:
+                    for subtitle in subtitles:
+                        subtitle.start += offset
+                        subtitle.end += offset
+                    combined_subtitles.extend(subtitles)
+                offset += datetime.timedelta(seconds=file.length)
+            combined_srt: str = srt.compose(combined_subtitles)
+            FFmpeg.set_subtitle(path, combined_srt)
 
             if any(os_utility.remove_file(file.path).is_err() for file in files):
                 logger.warning(
@@ -156,7 +208,7 @@ class Uploader:
 
     def _create_thumbnail(self, thumnail_path: str, files: List[UploadFile]) -> Optional[str]:
         for file in files:
-            if FFmpeg.has_thumbnail(file.path) and FFmpeg.get_thumbnail(file.path, thumnail_path):
+            if FFmpeg.get_thumbnail(file.path, thumnail_path):
                 break
         if not os.path.exists(thumnail_path):
             return None
@@ -186,6 +238,7 @@ class Uploader:
                                fill=(28, 28, 28), outline=(28, 28, 28), width=1)
 
         # バトルのアイコンを追加
+        battle = battle.split("(")[0]
         path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{battle}.png")
         if os.path.exists(path):
             battle_image = Image.open(path).convert("RGBA")
@@ -254,6 +307,19 @@ class Uploader:
                 self._youtube.set_thumbnail(video_id, thumbnail_path)
             except Exception as e:
                 logger.warning(f"サムネイルのアップロードに失敗しました: {e}")
+
+            srt_path = os.path.join(self.PENDING_DIR, f"{video_id}.srt")
+            try:
+                result = FFmpeg.get_subtitle(path)
+                if result.is_ok():
+                    with open(srt_path, "w", encoding="utf-8") as f:
+                        f.write(result.unwrap())
+                    self._youtube.insert_caption(video_id, srt_path)
+            except Exception as e:
+                logger.warning(f"字幕のアップロードに失敗しました: {e}")
+            finally:
+                if os_utility.remove_file(srt_path).is_err():
+                    logger.warning("字幕の削除に失敗しました")
 
             if os_utility.remove_file(thumbnail_path).is_err():
                 logger.warning("サムネイルの削除に失敗しました")

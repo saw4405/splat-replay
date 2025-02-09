@@ -11,7 +11,8 @@ from obs import Obs
 from uploader import Uploader
 from capture import Capture
 from analyzer import Analyzer
-from graceful_thread import GracefulThread
+from transcriber import Transcriber
+from utility.graceful_thread import GracefulThread
 import utility.os as os_utility
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class Recorder(GracefulThread):
 
         self._capture = Capture()
         self._analyzer = Analyzer()
+        self._transcriber = self._create_transcriber()
 
         self._matching_start_time: Optional[datetime.datetime] = None
         self._battle_result: Optional[str] = None
@@ -47,10 +49,26 @@ class Recorder(GracefulThread):
 
         self._power_off_callback: Optional[Callable[[], None]] = None
 
+    def _create_transcriber(self) -> Optional[Transcriber]:
+        mic_device = os.environ.get("MIC_DEVICE", "")
+        if len(mic_device) == 0:
+            logger.warning("マイクデバイスが設定されていないため、音声認識機能は無効化されます")
+            return None
+
+        model_path = os.path.join(os.path.dirname(__file__), "vosk_model")
+
+        try:
+            mic_device = int(mic_device)
+        except:
+            pass
+
+        return Transcriber(mic_device, model_path)
+
     def register_power_off_callback(self, callback: Callable[[], None]):
         self._power_off_callback = callback
 
     def run(self):
+        logger.info("Recorderを起動します")
         try:
             status = RecordStatus.OFF
             while not self.stopped:
@@ -70,8 +88,11 @@ class Recorder(GracefulThread):
                     # ローディング終了を監視し、終了したら録画再開
                     status = self._handle_pause_status(frame)
 
+        except Exception as e:
+            logger.error(f"Recorderでエラーが発生しました: {e}")
+
         finally:
-            logger.info("リソースを解放します")
+            logger.info("Recorderのリソースを解放します")
             self._capture.release()
             self._obs.close()
 
@@ -190,6 +211,8 @@ class Recorder(GracefulThread):
     def _start_record(self):
         logger.info("録画を開始します")
         self._obs.start_record()
+        if self._transcriber:
+            self._transcriber.start_recognition()
         self._record_start_time = time.time()
         self._battle_result = None
 
@@ -204,6 +227,8 @@ class Recorder(GracefulThread):
     def _cancel_record(self):
         logger.info("録画を中止します")
         _, path = self._obs.stop_record()
+        if self._transcriber:
+            self._transcriber.stop_recognition()
 
         self._matching_start_time = None
 
@@ -213,6 +238,8 @@ class Recorder(GracefulThread):
     def _stop_record(self, frame: np.ndarray):
         logger.info("録画を停止します")
         _, path = self._obs.stop_record()
+        self._transcriber.stop_recognition()
+        srt = self._transcriber.get_srt()
 
         # マッチ・ルールを分析する
         match = self._analyzer.match_name(frame) or ""
@@ -226,7 +253,7 @@ class Recorder(GracefulThread):
         start_datetime = self._matching_start_time or \
             Obs.extract_start_datetime(path)
         Uploader.queue(path, start_datetime, match, rule, stage,
-                       self._battle_result, self._x_power.get(rule, None), frame)
+                       self._battle_result, self._x_power.get(rule, None), frame, srt)
         logger.info("アップロードキューに追加しました")
 
         self._matching_start_time = None

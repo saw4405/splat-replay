@@ -1,11 +1,12 @@
 import os
 import subprocess
-from typing import List, Optional
+from typing import List, Optional, Literal
 import logging
 import json
 from dataclasses import dataclass
 
 import utility.os as os_utility
+from utility.result import Result, Ok, Err
 
 logger = logging.getLogger(__name__)
 
@@ -126,12 +127,20 @@ class FFmpeg:
 
     @staticmethod
     def get_thumbnail(video_path: str, thumbnail_output_path: str) -> bool:
+        result = FFmpeg._find_streams(video_path, "video", "png")
+        if result.is_err():
+            return False
+        if len(result.unwrap()) == 0:
+            logger.error("サムネイルが見つかりませんでした")
+            return False
+        index = result.unwrap()[0]
+
         directory = os.path.dirname(video_path)
         os.chdir(directory)
         command = [
             "ffmpeg",
             "-i", video_path,
-            "-map", "0:v:1",
+            "-map", f"0:v:{index}",
             "-c", "copy",
             thumbnail_output_path
         ]
@@ -143,29 +152,108 @@ class FFmpeg:
         return True
 
     @staticmethod
-    def has_thumbnail(video_path: str) -> bool:
-        # 映像・音声・サムネイル画像の3つのストリームがあるかどうかで簡易的に判定
-        return FFmpeg.get_stream_count(video_path) >= 3
+    def set_subtitle(video_path: str, srt: str) -> Result[None, str]:
+        """ 動画に字幕を埋め込む
+
+        Args:
+            video_path (str): 動画ファイルのパス
+            srt (str): SRT形式の字幕
+
+        Returns:
+            Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
+        """
+        extension = os.path.splitext(video_path)[1]
+        out_file = f"temp{extension}"
+        os_utility.remove_file(out_file)
+
+        directory = os.path.dirname(video_path)
+        os.chdir(directory)
+        command = [
+            "ffmpeg",
+            "-i", video_path,
+            "-f", "srt",
+            "-i", "-",
+            "-c", "copy",
+            "-c:s", "srt",
+            "-metadata:s:s:0", "title=Subtitles",
+            out_file
+        ]
+        result = subprocess.run(
+            command, input=srt, capture_output=True, text=True, encoding="utf-8")
+        if result.returncode != 0:
+            return Err("字幕の設定に失敗しました")
+
+        os_utility.remove_file(video_path)
+        if os_utility.rename_file(out_file, video_path).is_err():
+            return Err("字幕付き動画ファイルの更新に失敗しました")
+
+        return Ok()
 
     @staticmethod
-    def get_stream_count(video_path: str) -> int:
+    def get_subtitle(video_path: str) -> Result[str, str]:
+        """ 動画から字幕を取得する
+
+        Args:
+            video_path (str): 動画ファイルのパス
+
+        Returns:
+            Result[str, str]: 成功した場合はOkにSRT形式の字幕が格納され、失敗した場合はErrにエラーメッセージが格納される
+        """
+        result = FFmpeg._find_streams(video_path, "subtitle", "subrip")
+        if result.is_err():
+            return Err(result.unwrap_err())
+        if len(result.unwrap()) == 0:
+            return Err("字幕が見つかりませんでした")
+        index = result.unwrap()[0]
+
+        command = [
+            "ffmpeg",
+            "-i", video_path,
+            "-map", f"0:s:{index}",
+            "-c", "copy",
+            "-f", "srt",
+            "-"
+        ]
+        result = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8")
+        if result.returncode != 0:
+            return Err("字幕の取得に失敗しました")
+
+        return Ok(result.stdout)
+
+    @staticmethod
+    def _find_streams(video_path: str, codec_type: Literal["video", "audio", "subtitle"], codec_name: str) -> Result[List[int], str]:
+        """ 動画ファイルから指定されたコーデックのストリームを探す
+
+        Args:
+            video_path (str): 動画ファイルのパス
+            codec_type (Literal["video", "audio"]): コーデックの種類
+            codec_name (str): コーデック名
+
+        Returns:
+            Result[List[int], str]: 成功した場合はOkにストリームの相対インデックスが格納され、失敗した場合はErrにエラーメッセージが格納される
+        """
         command = [
             "ffprobe",
             "-v", "error",
-            "-show_entries", "stream",
+            "-show_streams",
             "-of", "json",
             video_path
         ]
         result = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8")
         if result.returncode != 0:
-            logger.error(f"ストリーム情報の取得に失敗しました: {result.stderr}")
-            return 0
+            return Err("ストリーム情報の取得に失敗しました")
 
         try:
             info = json.loads(result.stdout)
-            streams = info.get("streams", [])
-            return len(streams)
         except Exception as e:
-            logger.error(f"出力の解析中にエラーが発生しました: {e}")
-            return 0
+            return Err("JSON解析中にエラーが発生しました")
+
+        target_streams = [stream for stream in info["streams"]
+                          if stream.get("codec_type") == codec_type]
+        relative_indices = [
+            i for i, stream in enumerate(target_streams) if stream.get("codec_name") == codec_name
+        ]
+
+        return Ok(relative_indices)

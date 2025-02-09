@@ -26,7 +26,8 @@ class Youtube:
         self.CLIENT_SECRET_FILE = 'client_secrets.json'
         self.API_NAME = 'youtube'
         self.API_VERSION = 'v3'
-        self.SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
+        self.SCOPES = ['https://www.googleapis.com/auth/youtube.upload',
+                       'https://www.googleapis.com/auth/youtube.force-ssl']
 
         credentials = self._get_credentials()
         self._youtube = build(
@@ -116,6 +117,41 @@ class Youtube:
             request.execute()
 
             logger.info(f'Thumbnail uploaded successfully!')
+            return True
+        except google.auth.exceptions.GoogleAuthError as e:
+            logger.info(f"Authentication failed: {e}")
+            return False
+        except Exception as e:
+            logger.info(f"An error occurred: {e}")
+            return False
+        finally:
+            if media_file:
+                del media_file
+                gc.collect()
+
+    def insert_caption(self, video_id: str, caption_path: str, language: str = "ja") -> bool:
+        media_file = None
+        try:
+            # Specify the file to upload
+            media_file = MediaFileUpload(caption_path)
+
+            # Call the API's captions.insert method to upload the caption
+            request = self._youtube.captions().insert(
+                part="snippet",
+                body={
+                    'snippet': {
+                        'videoId': video_id,
+                        'language': language,
+                        'name': f'Caption for {language}',
+                    }
+                },
+                media_body=media_file
+            )
+
+            # Upload the caption
+            request.execute()
+
+            logger.info(f'Caption for "{language}" uploaded successfully!')
             return True
         except google.auth.exceptions.GoogleAuthError as e:
             logger.info(f"Authentication failed: {e}")
