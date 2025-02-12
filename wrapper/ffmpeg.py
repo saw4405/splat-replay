@@ -1,14 +1,11 @@
 import os
 import subprocess
 from typing import List, Optional, Literal
-import logging
 import json
 from dataclasses import dataclass
 
 import utility.os as os_utility
 from utility.result import Result, Ok, Err
-
-logger = logging.getLogger(__name__)
 
 
 class FFmpeg:
@@ -18,7 +15,16 @@ class FFmpeg:
         comment: str
 
     @staticmethod
-    def concat(files: List[str], out_path: str) -> bool:
+    def concat(files: List[str], out_path: str) -> Result[None, str]:
+        """ 動画ファイルを結合する
+
+        Args:
+            files (List[str]): 結合する動画ファイルのパスのリスト
+            out_path (str): 出力ファイルのパス
+
+        Returns:
+            Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
+        """
         directory = os.path.dirname(files[0])
         extension = os.path.splitext(out_path)[1]
         temp_path = f"temp{extension}"
@@ -39,23 +45,28 @@ class FFmpeg:
                 "-c", "copy",
                 temp_path
             ]
-            result = subprocess.run(
+            process = subprocess.run(
                 command, capture_output=True, text=True, encoding="utf-8")
-            if result.returncode != 0:
-                logger.error(f"動画の結合に失敗しました: {result.stderr}")
-                return False
+            if process.returncode != 0:
+                return Err(f"動画の結合に失敗しました: {process.stderr}")
 
             os_utility.rename_file(temp_path, out_path)
-            return True
+            return Ok()
 
         finally:
-            try:
-                os_utility.remove_file(concat_list_path)
-            except Exception as e:
-                logger.warning(f"一時ファイルの削除に失敗しました: {e}")
+            os_utility.remove_file(concat_list_path)
 
     @staticmethod
-    def write_metadata(file: str, metadata: Metadata) -> bool:
+    def write_metadata(file: str, metadata: Metadata) -> Result[None, str]:
+        """ 動画ファイルにメタデータを書き込む
+
+        Args:
+            file (str): 動画ファイルのパス
+            metadata (Metadata): メタデータ(タイトルとコメント)
+
+        Returns:
+            Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
+        """
         extension = os.path.splitext(file)[1]
         out_file = f"temp{extension}"
         directory = os.path.dirname(file)
@@ -71,14 +82,22 @@ class FFmpeg:
         result = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8")
         if result.returncode != 0:
-            logger.error(f"メタデータの書き込みに失敗しました: {result.stderr}")
-            return False
+            return Err(f"メタデータの書き込みに失敗しました: {result.stderr}")
+
         os_utility.remove_file(file)
         os_utility.rename_file(out_file, file)
-        return True
+        return Ok()
 
     @staticmethod
-    def read_metadata(file: str) -> Optional[Metadata]:
+    def read_metadata(file: str) -> Result[Metadata, str]:
+        """ 動画ファイルからメタデータを取得する
+
+        Args:
+            file (str): 動画ファイルのパス
+
+        Returns:
+            Result[Metadata, str]: 成功した場合はOkにメタデータ(タイトルとコメント)が格納され、失敗した場合はErrにエラーメッセージが格納される
+        """
         command = [
             "ffprobe",
             "-v", "error",
@@ -89,19 +108,28 @@ class FFmpeg:
         result = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8")
         if result.returncode != 0:
-            logger.error(f"メタデータの取得に失敗しました: {result.stderr}")
-            return None
+            return Err(f"メタデータの取得に失敗しました: {result.stderr}")
 
         data = json.loads(result.stdout)
         tags = data["format"].get("tags", {})
         tags = {k.lower(): v for k, v in tags.items()}
-        return FFmpeg.Metadata(
+        metadata = FFmpeg.Metadata(
             title=tags.get("title", ""),
             comment=tags.get("comment", "")
         )
+        return Ok(metadata)
 
     @staticmethod
-    def set_thumbnail(video_path: str, thumbnail_path: str) -> bool:
+    def set_thumbnail(video_path: str, thumbnail_data: bytes) -> Result[None, str]:
+        """ 動画にサムネイルを設定する
+
+        Args:
+            video_path (str): 動画ファイルのパス
+            thumbnail_data (bytes): サムネイルのバイナリデータ(png)
+
+        Returns:
+            Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
+        """
         extension = os.path.splitext(video_path)[1]
         out_file = f"temp{extension}"
         directory = os.path.dirname(video_path)
@@ -109,30 +137,36 @@ class FFmpeg:
         command = [
             "ffmpeg",
             "-i", video_path,
-            "-i", thumbnail_path,
+            "-i", "-",
             "-map", "0",
             "-map", "1",
             "-c", "copy",
             out_file
         ]
         result = subprocess.run(
-            command, capture_output=True, text=True, encoding="utf-8")
+            command, input=thumbnail_data, capture_output=True)
         if result.returncode != 0:
-            logger.error(f"サムネイルの設定に失敗しました: {result.stderr}")
-            return False
+            return Err("サムネイルの設定に失敗しました")
 
         os_utility.remove_file(video_path)
         os_utility.rename_file(out_file, video_path)
-        return True
+        return Ok()
 
     @staticmethod
-    def get_thumbnail(video_path: str, thumbnail_output_path: str) -> bool:
+    def get_thumbnail(video_path: str) -> Result[bytes, str]:
+        """ 動画からサムネイルを取得する
+
+        Args:
+            video_path (str): 動画ファイルのパス
+
+        Returns:    
+            Result[bytes, str]: 成功した場合はOkにサムネイルのバイナリデータ(png)が格納され、失敗した場合はErrにエラーメッセージが格納される
+        """
         result = FFmpeg._find_streams(video_path, "video", "png")
         if result.is_err():
-            return False
+            return Err(result.unwrap_err())
         if len(result.unwrap()) == 0:
-            logger.error("サムネイルが見つかりませんでした")
-            return False
+            return Err("サムネイルが見つかりませんでした")
         index = result.unwrap()[0]
 
         directory = os.path.dirname(video_path)
@@ -141,15 +175,15 @@ class FFmpeg:
             "ffmpeg",
             "-i", video_path,
             "-map", f"0:v:{index}",
+            "-f", "image2",
             "-c", "copy",
-            thumbnail_output_path
+            "pipe:1"
         ]
-        result = subprocess.run(
-            command, capture_output=True, text=True, encoding="utf-8")
+        result = subprocess.run(command, capture_output=True)
         if result.returncode != 0:
-            logger.error(f"サムネイルの取得に失敗しました: {result.stderr}")
-            return False
-        return True
+            return Err(f"サムネイルの取得に失敗しました: {result.stderr.decode('utf-8')}")
+
+        return Ok(result.stdout)
 
     @staticmethod
     def set_subtitle(video_path: str, srt: str) -> Result[None, str]:
@@ -173,6 +207,8 @@ class FFmpeg:
             "-i", video_path,
             "-f", "srt",
             "-i", "-",
+            "-map", "0",
+            "-map", "1",
             "-c", "copy",
             "-c:s", "srt",
             "-metadata:s:s:0", "title=Subtitles",
@@ -212,7 +248,7 @@ class FFmpeg:
             "-map", f"0:s:{index}",
             "-c", "copy",
             "-f", "srt",
-            "-"
+            "pipe:1"
         ]
         result = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8")

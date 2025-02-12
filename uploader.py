@@ -3,6 +3,7 @@ import logging
 import shutil
 import glob
 import datetime
+import io
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from collections import defaultdict
@@ -12,8 +13,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import srt
 
-from youtube import Youtube
-from ffmpeg import FFmpeg
+from wrapper.youtube import Youtube
+from wrapper.ffmpeg import FFmpeg
 from upload_file import UploadFile
 import utility.os as os_utility
 
@@ -46,10 +47,12 @@ class Uploader:
     def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float], result_image: Optional[np.ndarray], srt: Optional[str]):
         # リザルト画像がある場合、サムネイル画像として動画に埋め込む
         if result_image is not None:
-            image_path = os.path.splitext(path)[0] + ".png"
-            cv2.imwrite(image_path, result_image)
-            FFmpeg.set_thumbnail(path, image_path)
-            os_utility.remove_file(image_path)
+            ret, buffer = cv2.imencode('.png', result_image)
+            if ret:
+                binary_data = buffer.tobytes()
+                FFmpeg.set_thumbnail(path, binary_data)
+            else:
+                logger.error("画像のエンコードに失敗しました")
 
         # 字幕を動画に埋め込む
         if srt:
@@ -182,11 +185,9 @@ class Uploader:
             FFmpeg.write_metadata(path, FFmpeg.Metadata(title, description))
 
             # サムネイル画像を作成して動画に埋め込む
-            thumnail_path = os.path.splitext(path)[0] + ".png"
-            thumnail_path = self._create_thumbnail(thumnail_path, files)
-            if thumnail_path and os.path.exists(thumnail_path):
-                FFmpeg.set_thumbnail(path, thumnail_path)
-                os_utility.remove_file(thumnail_path)
+            thumnail_data = self._create_thumbnail(files)
+            if thumnail_data is not None:
+                FFmpeg.set_thumbnail(path, thumnail_data)
 
             # 字幕を結合して動画に埋め込む
             combined_subtitles: List[srt.Subtitle] = []
@@ -206,11 +207,15 @@ class Uploader:
                 logger.warning(
                     "結合前のファイル削除に失敗したため、結合後のファイルが再度アップロードされる可能性があります")
 
-    def _create_thumbnail(self, thumnail_path: str, files: List[UploadFile]) -> Optional[str]:
+    def _create_thumbnail(self, files: List[UploadFile]) -> Optional[bytes]:
+        thumbnail_data = None
         for file in files:
-            if FFmpeg.get_thumbnail(file.path, thumnail_path):
+            result = FFmpeg.get_thumbnail(file.path)
+            if result.is_ok():
+                thumbnail_data = result.unwrap()
                 break
-        if not os.path.exists(thumnail_path):
+        if thumbnail_data is None:
+            logger.warning("サムネイル画像が見つかりません")
             return None
 
         battle = files[0].battle
@@ -226,12 +231,12 @@ class Uploader:
         stage1 = stages[0] if len(stages) > 0 else None
         stage2 = stages[1] if len(stages) > 1 else None
 
-        self._design_thumbnail(
-            thumnail_path, battle, rule, rate, stage1, stage2)
-        return thumnail_path
+        thumbnail_data = self._design_thumbnail(
+            thumbnail_data, battle, rule, rate, stage1, stage2)
+        return thumbnail_data
 
-    def _design_thumbnail(self, thumbnail_path: str, battle: str, rule: str, rate: Optional[str], stage1: Optional[str], stage2: Optional[str]):
-        thumbnail = Image.open(thumbnail_path).convert("RGBA")
+    def _design_thumbnail(self, thumbnail_data: bytes, battle: str, rule: str, rate: Optional[str], stage1: Optional[str], stage2: Optional[str]) -> bytes:
+        thumbnail = Image.open(io.BytesIO(thumbnail_data)).convert("RGBA")
         draw = ImageDraw.Draw(thumbnail)
         # 不要なステージ部分を塗りつぶし
         draw.rounded_rectangle((777, 21, 1849, 750), radius=40,
@@ -286,27 +291,39 @@ class Uploader:
         else:
             logger.warning(f"ステージ画像が見つかりません: {stage2}")
 
-        thumbnail.save(thumbnail_path)
+        buf = io.BytesIO()
+        thumbnail.save(buf, format='PNG')
+        return buf.getvalue()
 
     def _upload_to_youtube(self):
         files = glob.glob(f'{self.PENDING_DIR}/*.*')
         for path in files:
-            metadata = FFmpeg.read_metadata(path)
+            result = FFmpeg.read_metadata(path)
+            if result.is_err():
+                logger.error("アップロードする動画のメタデータ取得に失敗しました")
+                continue
+            metadata = result.unwrap()
             logger.info(f"YouTubeにアップロードします: {metadata.title}")
-            video_id = self._youtube.upload(
+            result = self._youtube.upload(
                 path, metadata.title, metadata.comment)
-            if not video_id:
+            if result.is_err():
                 logger.info("YouTubeへのアップロードに失敗しました")
                 continue
-
             logger.info("YouTubeにアップロードしました")
+            video_id = result.unwrap()
+
+            thumbnail_path = os.path.join(self.PENDING_DIR, f"{video_id}.png")
             try:
-                thumbnail_path = os.path.join(
-                    self.PENDING_DIR, f"{video_id}.png")
-                FFmpeg.get_thumbnail(path, thumbnail_path)
-                self._youtube.set_thumbnail(video_id, thumbnail_path)
+                result = FFmpeg.get_thumbnail(path)
+                if result.is_ok():
+                    with open(thumbnail_path, "wb") as f:
+                        f.write(result.unwrap())
+                    self._youtube.set_thumbnail(video_id, thumbnail_path)
             except Exception as e:
                 logger.warning(f"サムネイルのアップロードに失敗しました: {e}")
+            finally:
+                if os_utility.remove_file(thumbnail_path).is_err():
+                    logger.warning("サムネイルの削除に失敗しました")
 
             srt_path = os.path.join(self.PENDING_DIR, f"{video_id}.srt")
             try:
@@ -314,15 +331,12 @@ class Uploader:
                 if result.is_ok():
                     with open(srt_path, "w", encoding="utf-8") as f:
                         f.write(result.unwrap())
-                    self._youtube.insert_caption(video_id, srt_path)
+                    self._youtube.insert_caption(video_id, srt_path, "ひとりごと")
             except Exception as e:
                 logger.warning(f"字幕のアップロードに失敗しました: {e}")
             finally:
                 if os_utility.remove_file(srt_path).is_err():
                     logger.warning("字幕の削除に失敗しました")
-
-            if os_utility.remove_file(thumbnail_path).is_err():
-                logger.warning("サムネイルの削除に失敗しました")
 
             if os_utility.remove_file(path).is_err():
                 logger.warning(

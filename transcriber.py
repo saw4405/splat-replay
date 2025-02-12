@@ -3,7 +3,7 @@ import queue
 import json
 import threading
 import datetime
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, TypedDict
 
 from vosk import Model, KaldiRecognizer
 import srt
@@ -12,8 +12,15 @@ import sounddevice as sd
 logger = logging.getLogger(__name__)
 
 
+class Device(TypedDict):
+    index: int
+    name: str
+    max_input_channels: int
+    default_samplerate: float
+
+
 class Transcriber:
-    def __init__(self, device: Union[int, str], model_path: str, sample_rate: int = 16000, block_size: int = 8000, gap_threshold: float = 0.5, custom_dictionary: Optional[List[str]] = None) -> None:
+    def __init__(self, device: Union[int, str], model_path: str, sample_rate: int = 16000, block_size: int = 8000, gap_threshold: float = 1.0, custom_dictionary: Optional[List[str]] = None) -> None:
         """
         :param device: マイクのデバイスインデックス(int)、またはデバイス名(str)
         :param model_path: Vosk のモデルディレクトリのパス
@@ -38,14 +45,21 @@ class Transcriber:
         self._thread: Optional[threading.Thread] = None
 
     @staticmethod
-    def list_audio_devices() -> None:
+    def get_audio_devices() -> List[Device]:
         """
         使用可能なオーディオデバイスを一覧表示する
         """
-        devices = sd.query_devices()
-        for i, device in enumerate(devices):
-            print(
-                f"Device {i}: {device['name']} ({device['max_input_channels']} channels)")
+        devices: List[Device] = []
+        for i, device in enumerate(sd.query_devices()):
+            if "BOYA" in device["name"]:
+                pass
+            devices.append({
+                "index": device["index"],
+                "name": device["name"],
+                "max_input_channels": device["max_input_channels"],
+                "default_samplerate": device["default_samplerate"]
+            })
+        return devices
 
     def _find_device_index(self, device: Union[int, str]) -> Optional[int]:
         """
@@ -116,8 +130,12 @@ class Transcriber:
                 result = json.loads(result_str)
                 segments = self._process_result(result)
                 self._segments.extend(segments)
-                if result.get("text", ""):
-                    logger.info("音声入力:", result.get("text", ""))
+                try:
+                    if result.get("text", ""):
+                        logger.info(f"音声入力:{result.get("text", "")}")
+                        print(f"音声入力:{result.get("text", "")}")
+                except Exception as e:
+                    logger.error(f"音声入力エラー: {e}")
 
         # ループ終了後、最終結果をフラッシュする
         final_result_str = self._recognizer.FinalResult()
@@ -149,6 +167,7 @@ class Transcriber:
                                          channels=1,
                                          device=self.device_index,
                                          callback=self._audio_callback)
+
         self._stream.start()
         self._thread = threading.Thread(target=self._recognition_loop)
         self._thread.start()
@@ -185,10 +204,21 @@ class Transcriber:
 
 # 利用例
 if __name__ == "__main__":
-    device_index: int = 1
-    custom_dict: List[str] = ["ジェッパ"]
-    recognizer = Transcriber(
-        model_path="vosk_model", device_index=device_index, custom_dictionary=custom_dict)
+    devices = Transcriber.get_audio_devices()
+    print("利用可能なオーディオデバイス:")
+    for device in devices:
+        print(
+            f"  {device['index']}: {device['name']} ({device['max_input_channels']} channels) {device['default_samplerate']} Hz")
+
+    # デバイスインデックスを入力する
+    try:
+        device_index = int(input("使用するデバイスのインデックスを入力してください: "))
+    except ValueError:
+        print("有効な数値を入力してください。")
+        exit(1)
+
+    recognizer = Transcriber(model_path="vosk_model",
+                             device=device_index)
     while True:
         try:
             recognizer.start_recognition()

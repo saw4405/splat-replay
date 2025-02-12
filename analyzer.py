@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, RGBMatcher
-from ocr import OCR
+from wrapper.ocr import OCR
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class Rectangle:
 
 class Analyzer:
     def __init__(self):
-        self._ocr = OCR()
+        self._ocr = OCR(os.environ["TESSERACT_PATH"])
         self._init_matchers()
 
     def _init_matchers(self):
@@ -188,7 +188,11 @@ class Analyzer:
             # OCRで読み取るようにXP表示部のみ切り取る (精度向上のため、4度回転させて文字を水平にする)
             xp_image = image[rect.y1:rect.y2, rect.x1:rect.x2]
             xp_image = self._rotate_image(xp_image, -4)
-            xp_str = self._ocr.get_text(xp_image).strip()
+            result = self._ocr.read_text(xp_image)
+            if result.is_err():
+                logger.warning(f"XパワーのOCRに失敗しました: {result.unwrap_err()}")
+                return None
+            xp_str = result.unwrap().strip()
 
             try:
                 xp = float(xp_str)

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import cv2
 import srt
 
-from ffmpeg import FFmpeg
+from wrapper.ffmpeg import FFmpeg
 
 
 @dataclass

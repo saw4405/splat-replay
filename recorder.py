@@ -7,9 +7,9 @@ from enum import Enum
 
 import numpy as np
 
-from obs import Obs
+from wrapper.obs import Obs
 from uploader import Uploader
-from capture import Capture
+from wrapper.capture import Capture
 from analyzer import Analyzer
 from transcriber import Transcriber
 from utility.graceful_thread import GracefulThread
@@ -29,14 +29,10 @@ class Recorder(GracefulThread):
     def __init__(self):
         super().__init__()
 
-        self._obs = Obs()
-        # バトル開始等の画像判定への入力として仮想カメラを起動する
-        if not self._obs.start_virtual_cam():
-            raise Exception("仮想カメラの起動に失敗しました")
-
-        self._capture = Capture()
+        self._obs = self._initialize_obs()
+        self._capture = self._initialize_capture()
         self._analyzer = Analyzer()
-        self._transcriber = self._create_transcriber()
+        self._transcriber = self._initialize_transcriber()
 
         self._matching_start_time: Optional[datetime.datetime] = None
         self._battle_result: Optional[str] = None
@@ -49,10 +45,32 @@ class Recorder(GracefulThread):
 
         self._power_off_callback: Optional[Callable[[], None]] = None
 
-    def _create_transcriber(self) -> Optional[Transcriber]:
+    def _initialize_obs(self) -> Obs:
+        path = os.environ["OBS_PATH"]
+        host = os.environ["OBS_WS_HOST"]
+        port = os.environ["OBS_WS_PORT"]
+        password = os.environ["OBS_WS_PASSWORD"]
+        obs = Obs(path, host, port, password)
+
+        # バトル開始等の画像判定への入力として仮想カメラを起動する
+        if obs.start_virtual_cam().is_err():
+            raise Exception("仮想カメラの起動に失敗しました")
+        return obs
+
+    def _initialize_capture(self) -> Capture:
+        index = int(os.environ["CAPTURE_DEVICE_INDEX"])
+        width = int(os.environ["CAPTURE_WIDTH"])
+        height = int(os.environ["CAPTURE_HEIGHT"])
+        result = Capture.create(index, width, height)
+        if result.is_err():
+            raise Exception(
+                "キャプチャーの初期化に失敗しました。\nCAPTURE_DEVICE_INDEXの設定が合っているか確認してください。")
+        return result.unwrap()
+
+    def _initialize_transcriber(self) -> Optional[Transcriber]:
         mic_device = os.environ.get("MIC_DEVICE", "")
         if len(mic_device) == 0:
-            logger.warning("マイクデバイスが設定されていないため、音声認識機能は無効化されます")
+            logger.info("マイクデバイスが設定されていないため、音声認識機能は無効化されます")
             return None
 
         model_path = os.path.join(os.path.dirname(__file__), "vosk_model")
@@ -62,7 +80,9 @@ class Recorder(GracefulThread):
         except:
             pass
 
-        return Transcriber(mic_device, model_path)
+        dictionary = ["リッター", "スパッタリー", "ナイス", "キル", "デス", "味方", "2落ち", "3落ち"]
+
+        return Transcriber(mic_device, model_path, custom_dictionary=dictionary)
 
     def register_power_off_callback(self, callback: Callable[[], None]):
         self._power_off_callback = callback
@@ -72,7 +92,11 @@ class Recorder(GracefulThread):
         try:
             status = RecordStatus.OFF
             while not self.stopped:
-                frame = self._capture.read()
+                result = self._capture.read()
+                if result.is_err():
+                    raise Exception(
+                        "フレームの読み込みに失敗しました。\n他のアプリケーションがカメラを使用していないか確認してください。")
+                frame = result.unwrap()
 
                 status = self._check_switch_power_status(frame, status)
 
@@ -119,7 +143,7 @@ class Recorder(GracefulThread):
         # PCがスリープから復帰したとき、キャプチャボードの接続が切れているので、再接続する
         if self._analyzer.virtual_camera_off(frame):
             logger.info("仮想カメラがOFFされました")
-            if not self._obs.start_virtual_cam():
+            if self._obs.start_virtual_cam().is_err():
                 logger.warning("仮想カメラの再起動に失敗しました")
             return RecordStatus.OFF
 
@@ -212,6 +236,7 @@ class Recorder(GracefulThread):
         logger.info("録画を開始します")
         self._obs.start_record()
         if self._transcriber:
+            logger.info("字幕起こしを開始します")
             self._transcriber.start_recognition()
         self._record_start_time = time.time()
         self._battle_result = None
@@ -226,8 +251,9 @@ class Recorder(GracefulThread):
 
     def _cancel_record(self):
         logger.info("録画を中止します")
-        _, path = self._obs.stop_record()
+        path = self._obs.stop_record().unwrap()
         if self._transcriber:
+            logger.info("字幕起こしを停止します")
             self._transcriber.stop_recognition()
 
         self._matching_start_time = None
@@ -237,8 +263,10 @@ class Recorder(GracefulThread):
 
     def _stop_record(self, frame: np.ndarray):
         logger.info("録画を停止します")
-        _, path = self._obs.stop_record()
-        self._transcriber.stop_recognition()
+        path = self._obs.stop_record().unwrap()
+        if self._transcriber:
+            logger.info("字幕起こしを停止します")
+            self._transcriber.stop_recognition()
         srt = self._transcriber.get_srt()
 
         # マッチ・ルールを分析する

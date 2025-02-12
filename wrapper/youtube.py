@@ -13,11 +13,11 @@ import google.auth.exceptions
 import google.auth.external_account_authorized_user
 import google.oauth2.credentials
 
+from utility.result import Result, Ok, Err
+
 Credentials = Union[google.auth.external_account_authorized_user.Credentials,
                     google.oauth2.credentials.Credentials]
 PrivacyStatus = Literal['public', 'private', 'unlisted']
-
-logger = logging.getLogger(__name__)
 
 
 class Youtube:
@@ -34,6 +34,11 @@ class Youtube:
             self.API_NAME, self.API_VERSION, credentials=credentials)
 
     def _load_credentials(self) -> Optional[Credentials]:
+        """ 認証情報をファイルからロードする
+
+        Returns:
+            Optional[Credentials]: 認証情報が存在する場合はCredentials、それ以外はNone
+        """
         if not os.path.exists(self.TOKEN_FILE):
             return None
 
@@ -41,10 +46,20 @@ class Youtube:
             return pickle.load(token_file)
 
     def _save_credentials(self, credentials: Credentials):
+        """ 認証情報をファイルに保存する
+
+        Args:
+            credentials (Credentials): 保存する認証情報
+        """
         with open(self.TOKEN_FILE, 'wb') as token_file:
             pickle.dump(credentials, token_file)
 
     def _get_credentials(self) -> Credentials:
+        """ 認証情報を取得する
+
+        Returns:
+            Credentials: 取得した認証情報
+        """
         credentials = self._load_credentials()
         if credentials:
             try:
@@ -61,104 +76,111 @@ class Youtube:
         self._save_credentials(credentials)
         return credentials
 
-    def upload(self, path: str, title: str, description: str, category: int = 20, privacy_status: PrivacyStatus = 'private') -> Optional[str]:
+    def upload(self, path: str, title: str, description: str, category: int = 20, privacy_status: PrivacyStatus = 'private') -> Result[str, str]:
+        """ 動画をアップロードする
+
+        Args:
+            path (str): アップロードする動画のパス
+            title (str): 動画のタイトル
+            description (str): 動画の説明
+            category (int, optional): 動画のカテゴリー. Defaults to 20.
+            privacy_status (PrivacyStatus, optional): 動画の公開範囲. Defaults to 'private'.
+
+        Returns:
+            Result[str, str]: 成功した場合はOkに動画IDが格納され、失敗した場合はErrにエラーメッセージが格納される
+        """
         media_file = None
         try:
-            # Specify the file to upload
             media_file = MediaFileUpload(
                 path, mimetype='video/*', resumable=True)
-
-            # Call the API's videos.insert method to upload the video
             request = self._youtube.videos().insert(
                 part="snippet,status",
                 body={
                     'snippet': {
                         'title': title,
                         'description': description,
-                        'categoryId': category  # 20 for Gaming
+                        'categoryId': category
                     },
                     'status': {
-                        'privacyStatus': privacy_status  # 'public', 'private', or 'unlisted'
+                        'privacyStatus': privacy_status
                     }
                 },
                 media_body=media_file
             )
-
-            # Upload the video
             response = request.execute()
+            return Ok(response["id"])
 
-            logger.info(f'Video "{title}" uploaded successfully!')
-            logger.info(f'Video ID: {response["id"]}')
-            return response["id"]
         except google.auth.exceptions.GoogleAuthError as e:
-            logger.info(f"Authentication failed: {e}")
-            return None
+            return Err(f"認証に失敗しました: {e}")
         except Exception as e:
-            logger.info(f"An error occurred: {e}")
-            return None
+            return Err(f"アップロードに失敗しました: {e}")
         finally:
             if media_file:
                 del media_file
                 gc.collect()
 
-    def set_thumbnail(self, video_id: str, image_path: str) -> bool:
+    def set_thumbnail(self, video_id: str, image_path: str) -> Result[None, str]:
+        """ 動画のサムネイルを設定する
+
+        Args:
+            video_id (str): 動画ID
+            image_path (str): サムネイルの画像パス
+
+        Returns:
+            Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
+        """
         media_file = None
         try:
-            # Specify the file to upload
             media_file = MediaFileUpload(image_path)
-
-            # Call the API's thumbnails.set method to upload the thumbnail
             request = self._youtube.thumbnails().set(
                 videoId=video_id,
                 media_body=media_file
             )
-
-            # Upload the thumbnail
             request.execute()
+            return Ok()
 
-            logger.info(f'Thumbnail uploaded successfully!')
-            return True
         except google.auth.exceptions.GoogleAuthError as e:
-            logger.info(f"Authentication failed: {e}")
-            return False
+            return Err(f"認証に失敗しました: {e}")
         except Exception as e:
-            logger.info(f"An error occurred: {e}")
-            return False
+            return Err(f"アップロードに失敗しました: {e}")
         finally:
             if media_file:
                 del media_file
                 gc.collect()
 
-    def insert_caption(self, video_id: str, caption_path: str, language: str = "ja") -> bool:
+    def insert_caption(self, video_id: str, caption_path: str, caption_name: str, language: str = "ja") -> Result[None, str]:
+        """ 動画に字幕を設定する
+
+        Args:
+            video_id (str): 動画ID
+            caption_path (str): 字幕ファイルのパス
+            caption_name (str): 字幕の名前
+            language (str, optional): 字幕の言語. Defaults to "ja".
+
+        Returns:
+            Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
+        """
         media_file = None
         try:
-            # Specify the file to upload
             media_file = MediaFileUpload(caption_path)
-
-            # Call the API's captions.insert method to upload the caption
             request = self._youtube.captions().insert(
                 part="snippet",
                 body={
                     'snippet': {
                         'videoId': video_id,
                         'language': language,
-                        'name': f'Caption for {language}',
+                        'name': caption_name,
                     }
                 },
                 media_body=media_file
             )
-
-            # Upload the caption
             request.execute()
+            return Ok()
 
-            logger.info(f'Caption for "{language}" uploaded successfully!')
-            return True
         except google.auth.exceptions.GoogleAuthError as e:
-            logger.info(f"Authentication failed: {e}")
-            return False
+            return Err(f"認証に失敗しました: {e}")
         except Exception as e:
-            logger.info(f"An error occurred: {e}")
-            return False
+            return Err(f"アップロードに失敗しました: {e}")
         finally:
             if media_file:
                 del media_file
