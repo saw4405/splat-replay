@@ -5,7 +5,6 @@ import glob
 import datetime
 import io
 from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
 from collections import defaultdict
 
 import cv2
@@ -44,20 +43,7 @@ class Uploader:
     ]
 
     @staticmethod
-    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float], result_image: Optional[np.ndarray], srt: Optional[str]):
-        # リザルト画像がある場合、サムネイル画像として動画に埋め込む
-        if result_image is not None:
-            ret, buffer = cv2.imencode('.png', result_image)
-            if ret:
-                binary_data = buffer.tobytes()
-                FFmpeg.set_thumbnail(path, binary_data)
-            else:
-                logger.error("画像のエンコードに失敗しました")
-
-        # 字幕を動画に埋め込む
-        if srt:
-            FFmpeg.set_subtitle(path, srt)
-
+    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float], result_image: Optional[np.ndarray], srt_str: Optional[str]):
         # 動画を規定の場所に移動(キューに追加)
         new_file_base_name = UploadFile.make_file_base_name(
             start_datetime, match, rule, stage, result, xpower)
@@ -65,6 +51,16 @@ class Uploader:
         new_path = os.path.join(Uploader.RECORDED_DIR,
                                 new_file_base_name + extension)
         os_utility.rename_file(path, new_path)
+
+        upload_file = UploadFile(new_path)
+
+        # リザルト画像がある場合、サムネイル画像として動画に埋め込む
+        if result_image is not None:
+            upload_file.set_thumbnail(result_image)
+
+        # 字幕を動画に埋め込む
+        if srt_str:
+            upload_file.embed_subtitles(srt_str)
 
     def __init__(self):
         super().__init__()
@@ -74,11 +70,16 @@ class Uploader:
 
         self._youtube = Youtube()
 
-    def _timedelta_to_str(self, delta: datetime.timedelta) -> str:
-        total_seconds = int(delta.total_seconds())
+    @staticmethod
+    def format_seconds(seconds: float) -> str:
+        total_seconds = int(seconds)
         hours, remainder = divmod(total_seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
         return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+    @staticmethod
+    def xp_prefix(xpower: float) -> str:
+        return str(int(xpower) // 100)
 
     def _generate_title_and_description(self, files: List[UploadFile], day: datetime.date, time: datetime.time, battle: str, rule: str) -> Tuple[str, str]:
         description = ""
@@ -89,45 +90,34 @@ class Uploader:
 
         for file in files:
             # タイトルに付けるため、勝敗数をカウント
-            if file.result == "WIN":
-                win_count += 1
-            elif file.result == "LOSE":
-                lose_count += 1
+            win_count += (file.result == "WIN")
+            lose_count += (file.result == "LOSE")
 
             # Xパワーの変動があったタイミングだけ説明にXパワーを記載
             if file.xpower and last_xpower != file.xpower:
                 description += f"XP: {file.xpower}\n"
                 last_xpower = file.xpower
 
-            elapsed_time_str = self._timedelta_to_str(
-                datetime.timedelta(seconds=elapsed_time))
-            description += f"{elapsed_time_str} {
-                file.result.ljust(4)} {file.stage} \n"
+            elapsed_time_str = Uploader.format_seconds(elapsed_time)
+            line = f"{elapsed_time_str} {file.result.ljust(4)} {file.stage} \n"
+            description += line
             elapsed_time += file.length
 
         xpowers = [file.xpower for file in files if file.xpower]
-        max_xpower = max(xpowers) if len(xpowers) > 0 else None
-        min_xpower = min(xpowers) if len(xpowers) > 0 else None
         if len(xpowers) == 0:
             xpower = ""
-        elif max_xpower == min_xpower:
-            xpower = f"({max_xpower})"
         else:
-            common_length = 0
-            min_xpower_str = str(min_xpower)
-            max_xpower_str = str(max_xpower)
-            for i in range(min(len(min_xpower_str), len(max_xpower_str))):
-                if min_xpower_str[i] == max_xpower_str[i]:
-                    common_length += 1
-                else:
-                    break
-            xpower = f"({min_xpower_str}-{max_xpower_str[common_length:]})"
+            max_xpower_prefix = Uploader.xp_prefix(max(xpowers))
+            min_xpower_prefix = Uploader.xp_prefix(min(xpowers))
+            if min_xpower_prefix == max_xpower_prefix:
+                xpower = f"(XP{min_xpower_prefix})"
+            else:
+                xpower = f"(XP{min_xpower_prefix}-{max_xpower_prefix})"
 
         day_str = day.strftime("'%y.%m.%d")
         time_str = time.strftime("%H").lstrip("0")
 
-        title = f"{day_str} {time_str}時～ {battle}{
-            xpower} {rule} {win_count}勝{lose_count}敗"
+        title = f"{battle}{xpower} {rule} {win_count}勝{lose_count}敗 {day_str} {time_str}時～"
         return title, description
 
     def _split_by_time_ranges(self, files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
