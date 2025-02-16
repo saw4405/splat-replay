@@ -48,7 +48,7 @@ class Recorder(GracefulThread):
     def _initialize_obs(self) -> Obs:
         path = os.environ["OBS_PATH"]
         host = os.environ["OBS_WS_HOST"]
-        port = os.environ["OBS_WS_PORT"]
+        port = int(os.environ["OBS_WS_PORT"])
         password = os.environ["OBS_WS_PASSWORD"]
         obs = Obs(path, host, port, password)
 
@@ -263,11 +263,16 @@ class Recorder(GracefulThread):
 
     def _stop_record(self, frame: np.ndarray):
         logger.info("録画を停止します")
-        path = self._obs.stop_record().unwrap()
+        result = self._obs.stop_record()
+        if result.is_err():
+            logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
+            return
+        path = result.unwrap()
+        srt = None
         if self._transcriber:
             logger.info("字幕起こしを停止します")
             self._transcriber.stop_recognition()
-        srt = self._transcriber.get_srt()
+            srt = self._transcriber.get_srt()
 
         # マッチ・ルールを分析する
         match = self._analyzer.match_name(frame) or ""
@@ -279,9 +284,11 @@ class Recorder(GracefulThread):
 
         # アップロードキューに追加
         start_datetime = self._matching_start_time or \
-            Obs.extract_start_datetime(path)
+            Obs.extract_start_datetime(path) or \
+            datetime.datetime.now()
+        result = self._battle_result or ""
         Uploader.queue(path, start_datetime, match, rule, stage,
-                       self._battle_result, self._x_power.get(rule, None), frame, srt)
+                       result, self._x_power.get(rule, None), frame, srt)
         logger.info("アップロードキューに追加しました")
 
         self._matching_start_time = None

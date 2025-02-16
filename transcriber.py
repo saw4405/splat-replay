@@ -3,7 +3,7 @@ import queue
 import json
 import threading
 import datetime
-from typing import Optional, List, Dict, Any, Union, TypedDict
+from typing import Optional, List, Dict, Any, Union, TypedDict, cast
 
 from vosk import Model, KaldiRecognizer
 import srt
@@ -50,14 +50,15 @@ class Transcriber:
         使用可能なオーディオデバイスを一覧表示する
         """
         devices: List[Device] = []
-        for i, device in enumerate(sd.query_devices()):
-            if "BOYA" in device["name"]:
+        for dev in sd.query_devices():
+            dev_dict = cast(Dict[str, Any], dev)
+            if "BOYA" in dev_dict["name"]:
                 pass
             devices.append({
-                "index": device["index"],
-                "name": device["name"],
-                "max_input_channels": device["max_input_channels"],
-                "default_samplerate": device["default_samplerate"]
+                "index": dev_dict["index"],
+                "name": dev_dict["name"],
+                "max_input_channels": dev_dict["max_input_channels"],
+                "default_samplerate": dev_dict["default_samplerate"]
             })
         return devices
 
@@ -67,11 +68,11 @@ class Transcriber:
         """
         if isinstance(device, int):
             return device
-        devices = sd.query_devices()
-        for i, dev in enumerate(devices):
-            if device in dev["name"]:
-                logger.info(f"Device {i}: {dev['name']}")
-                return i
+        for dev in sd.query_devices():
+            dev_dict = cast(Dict[str, Any], dev)
+            if device in dev_dict["name"]:
+                logger.info(f"Device {dev_dict["index"]}: {dev_dict['name']}")
+                return dev_dict["index"]
         return None
 
     def _process_result(self, result_json: Dict[str, Any]) -> List[List[Dict[str, Any]]]:
@@ -120,6 +121,9 @@ class Transcriber:
         別スレッドで回す認識ループ。キューからデータを取得し、
         Vosk で音声認識を行い、結果から字幕用セグメントを抽出する。
         """
+        if self._recognizer is None:
+            raise ValueError("Recognizer is not initialized")
+
         while self._running:
             if self._queue.empty():
                 continue
@@ -183,7 +187,8 @@ class Transcriber:
         self._running = False
         self._stream.stop()
         self._stream.close()
-        self._thread.join()
+        if self._thread:
+            self._thread.join()
         logger.info("音声認識を停止しました")
 
     def get_srt(self) -> str:

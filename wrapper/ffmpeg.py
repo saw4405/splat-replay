@@ -51,7 +51,7 @@ class FFmpeg:
                 return Err(f"動画の結合に失敗しました: {process.stderr}")
 
             os_utility.rename_file(temp_path, out_path)
-            return Ok()
+            return Ok(None)
 
         finally:
             os_utility.remove_file(concat_list_path)
@@ -86,7 +86,7 @@ class FFmpeg:
 
         os_utility.remove_file(file)
         os_utility.rename_file(out_file, file)
-        return Ok()
+        return Ok(None)
 
     @staticmethod
     def read_metadata(file: str) -> Result[Metadata, str]:
@@ -150,7 +150,7 @@ class FFmpeg:
 
         os_utility.remove_file(video_path)
         os_utility.rename_file(out_file, video_path)
-        return Ok()
+        return Ok(None)
 
     @staticmethod
     def get_thumbnail(video_path: str) -> Result[bytes, str]:
@@ -165,9 +165,9 @@ class FFmpeg:
         result = FFmpeg._find_streams(video_path, "video", "png")
         if result.is_err():
             return Err(result.unwrap_err())
-        if len(result.unwrap()) == 0:
+        if (indices := result.unwrap()) == 0:
             return Err("サムネイルが見つかりませんでした")
-        index = result.unwrap()[0]
+        index = indices[0]
 
         directory = os.path.dirname(video_path)
         os.chdir(directory)
@@ -223,7 +223,7 @@ class FFmpeg:
         if os_utility.rename_file(out_file, video_path).is_err():
             return Err("字幕付き動画ファイルの更新に失敗しました")
 
-        return Ok()
+        return Ok(None)
 
     @staticmethod
     def get_subtitle(video_path: str) -> Result[str, str]:
@@ -238,9 +238,9 @@ class FFmpeg:
         result = FFmpeg._find_streams(video_path, "subtitle", "subrip")
         if result.is_err():
             return Err(result.unwrap_err())
-        if len(result.unwrap()) == 0:
+        if (indices := result.unwrap()) == 0:
             return Err("字幕が見つかりませんでした")
-        index = result.unwrap()[0]
+        index = indices[0]
 
         command = [
             "ffmpeg",

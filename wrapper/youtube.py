@@ -137,7 +137,7 @@ class Youtube:
                 media_body=media_file
             )
             request.execute()
-            return Ok()
+            return Ok(None)
 
         except google.auth.exceptions.GoogleAuthError as e:
             return Err(f"認証に失敗しました: {e}")
@@ -175,7 +175,7 @@ class Youtube:
                 media_body=media_file
             )
             request.execute()
-            return Ok()
+            return Ok(None)
 
         except google.auth.exceptions.GoogleAuthError as e:
             return Err(f"認証に失敗しました: {e}")

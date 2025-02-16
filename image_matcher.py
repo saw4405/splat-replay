@@ -53,7 +53,9 @@ class TemplateMatcher(BaseMatcher):
 
 
 class HSVMatcher(BaseMatcher):
-    def __init__(self, lower_bound: np.ndarray, upper_bound: np.ndarray, mask_path: Optional[str] = None, threshold: float = 0.9):
+    # def __init__(self, lower_bound: np.ndarray, upper_bound: np.ndarray, mask_path: Optional[str] = None, threshold: float = 0.9):
+
+    def __init__(self, lower_bound: Tuple[int, int, int], upper_bound: Tuple[int, int, int], mask_path: str, threshold: float = 0.9):
         """
         HSV色空間での色の一致を検出するクラス。
 
@@ -63,8 +65,8 @@ class HSVMatcher(BaseMatcher):
         :param threshold: 一致とみなす割合の閾値（0.0〜1.0）。
         """
         super().__init__(mask_path)
-        self._lower_bound = lower_bound
-        self._upper_bound = upper_bound
+        self._lower_bound = np.array(lower_bound, dtype=np.uint8)
+        self._upper_bound = np.array(upper_bound, dtype=np.uint8)
         self._threshold = threshold
 
     def match(self, image: np.ndarray) -> bool:
@@ -74,6 +76,7 @@ class HSVMatcher(BaseMatcher):
         :param image: 検索対象のイメージ。
         :return: 一致したかどうか。
         """
+        assert self._mask is not None, "Mask image is required for HSVMatcher."
         masked_image = cv2.bitwise_and(image, image, mask=self._mask)
         hsv_image = cv2.cvtColor(masked_image, cv2.COLOR_BGR2HSV)
         color_mask = cv2.inRange(
@@ -89,7 +92,7 @@ class HSVMatcher(BaseMatcher):
 
 
 class RGBMatcher(BaseMatcher):
-    def __init__(self, rgb: np.ndarray, mask_path: Optional[str] = None, threshold: float = 0.9):
+    def __init__(self, rgb: Tuple[int, int, int], mask_path: Optional[str] = None, threshold: float = 0.9):
         """
         RGB色空間での色の一致を検出するクラス。
 

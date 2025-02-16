@@ -17,12 +17,12 @@ def remove_file(path: str, timeout_intervals: int = 10) -> Result[None, str]:
         bool: ファイルが正常に削除された場合 True、削除できなかった場合 False
     """
     if not os.path.exists(path):
-        return Ok()
+        return Ok(None)
 
     for _ in range(timeout_intervals):
         try:
             os.remove(path)
-            return Ok()
+            return Ok(None)
         except:
             time.sleep(0.1)
 
@@ -48,7 +48,7 @@ def rename_file(old_path: str, new_path: str, timeout_intervals: int = 10) -> Re
     for _ in range(timeout_intervals):
         try:
             os.rename(old_path, new_path)
-            return Ok()
+            return Ok(None)
         except:
             time.sleep(0.1)
 

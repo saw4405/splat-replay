@@ -34,7 +34,7 @@ class Obs:
         except:
             return None
 
-    def __init__(self, path: str, host: str, port: str, password: str):
+    def __init__(self, path: str, host: str, port: int, password: str):
         self.directory = os.path.dirname(path)
         self.file = os.path.basename(path)
         self.host = host
@@ -125,13 +125,13 @@ class Obs:
 
         status = result.datain.get("outputActive", False)
         if status:
-            return Ok()
+            return Ok(None)
 
         result = self._request_obs(requests.StartVirtualCam())
         if not result.status:
             return Err("仮想カメラの起動に失敗しました")
 
-        return Ok()
+        return Ok(None)
 
     def stop_virtual_cam(self) -> Result[None, str]:
         """ 仮想カメラを停止する
@@ -142,13 +142,13 @@ class Obs:
         result = self._request_obs(requests.GetVirtualCamStatus())
         status = result.datain.get("outputActive", False)
         if status == False:
-            return Ok()
+            return Ok(None)
 
         result = self._request_obs(requests.StopVirtualCam())
         if not result.status:
             return Err("仮想カメラの停止に失敗しました")
 
-        return Ok()
+        return Ok(None)
 
     def _get_record_status(self) -> Tuple[bool, bool]:
         """ 録画の状態を取得する
@@ -169,13 +169,13 @@ class Obs:
         """
         active, _ = self._get_record_status()
         if active:
-            return Ok()
+            return Ok(None)
 
         result = self._request_obs(requests.StartRecord())
         if not result.status:
             return Err("録画の開始に失敗しました")
 
-        return Ok()
+        return Ok(None)
 
     def stop_record(self) -> Result[str, str]:
         """ 録画を停止する
@@ -205,13 +205,13 @@ class Obs:
         """
         _, paused = self._get_record_status()
         if paused:
-            return Ok()
+            return Ok(None)
 
         result = self._request_obs(requests.PauseRecord())
         if not result.status:
             return Err("録画の一時停止に失敗しました")
 
-        return Ok()
+        return Ok(None)
 
     def resume_record(self) -> Result[None, str]:
         """ 録画を再開する
@@ -221,10 +221,10 @@ class Obs:
         """
         _, paused = self._get_record_status()
         if not paused:
-            return Ok()
+            return Ok(None)
 
         result = self._request_obs(requests.ResumeRecord())
         if not result.status:
             return Err("録画の再開に失敗しました")
 
-        return Ok()
+        return Ok(None)

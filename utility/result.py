@@ -1,6 +1,7 @@
-from typing import Generic, TypeVar, Callable, Optional
+from typing import Generic, TypeVar, Callable
 
 T = TypeVar('T')
+U = TypeVar('U')
 E = TypeVar('E')
 
 
@@ -17,7 +18,7 @@ class Result(Generic[T, E]):
     def unwrap_err(self) -> E:
         raise NotImplementedError
 
-    def map(self, func: Callable[[T], T]) -> 'Result[T, E]':
+    def map(self, func: Callable[[T], U]) -> 'Result[U, E]':
         if self.is_ok():
             return Ok(func(self.unwrap()))
         return self  # type: ignore
@@ -29,7 +30,7 @@ class Result(Generic[T, E]):
 
 
 class Ok(Result[T, E]):
-    def __init__(self, value: Optional[T] = None):
+    def __init__(self, value: T):
         self._value = value
 
     def is_ok(self) -> bool:
