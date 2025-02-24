@@ -165,7 +165,7 @@ class FFmpeg:
         result = FFmpeg._find_streams(video_path, "video", "png")
         if result.is_err():
             return Err(result.unwrap_err())
-        if (indices := result.unwrap()) == 0:
+        if len(indices := result.unwrap()) == 0:
             return Err("サムネイルが見つかりませんでした")
         index = indices[0]
 
@@ -238,7 +238,7 @@ class FFmpeg:
         result = FFmpeg._find_streams(video_path, "subtitle", "subrip")
         if result.is_err():
             return Err(result.unwrap_err())
-        if (indices := result.unwrap()) == 0:
+        if len(indices := result.unwrap()) == 0:
             return Err("字幕が見つかりませんでした")
         index = indices[0]
 
