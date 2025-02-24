@@ -14,6 +14,7 @@ from analyzer import Analyzer
 from transcriber import Transcriber
 from utility.graceful_thread import GracefulThread
 import utility.os as os_utility
+from rate import RateBase, XP, Udemae
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class Recorder(GracefulThread):
 
         self._matching_start_time: Optional[datetime.datetime] = None
         self._battle_result: Optional[str] = None
-        self._x_power: Dict[str, float] = {}
+        self._rank: Dict[str, RateBase] = {}
         self._record_start_time = time.time()
         self._last_power_check_time = time.time()
         self._screen_off_count = 0
@@ -161,9 +162,14 @@ class Recorder(GracefulThread):
             # XPが表示されたら記録しとく (XPはマッチング開始前に表示される)
             if result := self._analyzer.x_power(frame):
                 rule, xp = result
-                if self._x_power.get(rule, 0.0) != xp:
+                if self._rank.get(rule, XP(0.0)) != xp:
                     logger.info(f"{rule}のXパワー: {xp}")
-                    self._x_power[rule] = xp
+                    self._rank[rule] = xp
+
+            if udemae := self._analyzer.udemae(frame):
+                if self._rank.get("ウデマエ", XP(0.0)) != udemae:
+                    logger.info(f"ウデマエ: {udemae}")
+                    self._rank["ウデマエ"] = udemae
 
             # 動画のスケジュール分けを正確にできるよう、マッチング開始時の日時を記録しておく
             if self._analyzer.matching_start(frame):
@@ -282,14 +288,17 @@ class Recorder(GracefulThread):
         stage = self._analyzer.stage_name(frame) or ""
         logger.info(f"ステージ: {stage}")
 
+        rank_key = rule if match == "Xマッチ" else "ウデマエ"
+        rank = self._rank.get(rank_key, None)
+
         # アップロードキューに追加
         start_datetime = self._matching_start_time or \
             Obs.extract_start_datetime(path) or \
             datetime.datetime.now()
         result = self._battle_result or ""
-        Uploader.queue(path, start_datetime, match, rule, stage,
-                       result, self._x_power.get(rule, None), frame, srt)
+        Uploader.queue(path, start_datetime, match, rule,
+                       stage, result, rank, frame, srt)
         logger.info("アップロードキューに追加しました")
 
         self._matching_start_time = None
-        self._x_power = {}  # バトル後はXPが更新されている可能性があるので、いったんリセットする
+        self._rank = {}  # バトル後はXPが更新されている可能性があるので、いったんリセットする

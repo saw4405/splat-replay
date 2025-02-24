@@ -16,6 +16,7 @@ from wrapper.youtube import Youtube
 from wrapper.ffmpeg import FFmpeg
 from upload_file import UploadFile
 import utility.os as os_utility
+from rate import RateBase, XP, Udemae
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +44,10 @@ class Uploader:
     ]
 
     @staticmethod
-    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float], result_image: Optional[np.ndarray], srt_str: Optional[str]):
+    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, rank: Optional[RateBase], result_image: Optional[np.ndarray], srt_str: Optional[str]):
         # 動画を規定の場所に移動(キューに追加)
         new_file_base_name = UploadFile.make_file_base_name(
-            start_datetime, match, rule, stage, result, xpower)
+            start_datetime, match, rule, stage, result, rank)
         _, extension = os.path.splitext(os.path.basename(path))
         new_path = os.path.join(Uploader.RECORDED_DIR,
                                 new_file_base_name + extension)
@@ -77,16 +78,12 @@ class Uploader:
         minutes, seconds = divmod(remainder, 60)
         return f"{hours:02}:{minutes:02}:{seconds:02}"
 
-    @staticmethod
-    def xp_prefix(xpower: float) -> str:
-        return str(int(xpower) // 100)
-
     def _generate_title_and_description(self, files: List[UploadFile], day: datetime.date, time: datetime.time, battle: str, rule: str) -> Tuple[str, str]:
         description = ""
         elapsed_time = 0
         win_count = 0
         lose_count = 0
-        last_xpower = 0.0
+        last_rate: Optional[RateBase] = None
 
         for file in files:
             # タイトルに付けるため、勝敗数をカウント
@@ -94,30 +91,32 @@ class Uploader:
             lose_count += (file.result == "LOSE")
 
             # Xパワーの変動があったタイミングだけ説明にXパワーを記載
-            if file.xpower and last_xpower != file.xpower:
-                description += f"XP: {file.xpower}\n"
-                last_xpower = file.xpower
+            if file.rate and last_rate != file.rate:
+                rate_prefix = f"{file.rate.label}: " if battle == "Xマッチ" else ""
+                description += f"{rate_prefix}{file.rate}\n"
+                last_rate = file.rate
 
             elapsed_time_str = Uploader.format_seconds(elapsed_time)
             line = f"{elapsed_time_str} {file.result.ljust(4)} {file.stage} \n"
             description += line
             elapsed_time += file.length
 
-        xpowers = [file.xpower for file in files if file.xpower]
-        if len(xpowers) == 0:
-            xpower = ""
+        rates = [file.rate for file in files if file.rate]
+        if len(rates) == 0:
+            rate = ""
         else:
-            max_xpower_prefix = Uploader.xp_prefix(max(xpowers))
-            min_xpower_prefix = Uploader.xp_prefix(min(xpowers))
-            if min_xpower_prefix == max_xpower_prefix:
-                xpower = f"(XP{min_xpower_prefix})"
+            max_rate = max(rates).short_str()
+            min_rate = min(rates).short_str()
+            rate_prefix = rates[0].label if battle == "Xマッチ" else ""
+            if min_rate == max_rate:
+                rate = f"({rate_prefix}{min_rate})"
             else:
-                xpower = f"(XP{min_xpower_prefix}-{max_xpower_prefix})"
+                rate = f"({rate_prefix}{min_rate}-{max_rate})"
 
         day_str = day.strftime("'%y.%m.%d")
         time_str = time.strftime("%H").lstrip("0")
 
-        title = f"{battle}{xpower} {rule} {win_count}勝{lose_count}敗 {day_str} {time_str}時～"
+        title = f"{battle}{rate} {rule} {win_count}勝{lose_count}敗 {day_str} {time_str}時～"
         return title, description
 
     def _split_by_time_ranges(self, files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
@@ -210,12 +209,17 @@ class Uploader:
 
         battle = files[0].battle
         rule = files[0].rule
-        xpowers = [file.xpower for file in files if file.xpower]
-        min_xpower = min(xpowers) if len(xpowers) > 0 else None
-        max_xpower = max(xpowers) if len(xpowers) > 0 else None
-        rate = None if min_xpower is None else \
-            f"XP: {min_xpower}" if min_xpower == max_xpower else \
-            f"XP: {min_xpower} ~ {max_xpower}"
+        rates = [file.rate for file in files if file.rate]
+        if len(rates) == 0:
+            rate = None
+        else:
+            min_rate = min(rates)
+            max_rate = max(rates)
+            rate_prefix = f"{min_rate.label}: " if battle == "Xマッチ" else ""
+            if min_rate == max_rate:
+                rate = f"{rate_prefix}{min_rate}"
+            else:
+                rate = f"{rate_prefix}{min_rate} ~ {max_rate}"
         stages = [file.stage for file in files]
         stages = list(dict.fromkeys(stages))
         stage1 = stages[0] if len(stages) > 0 else None
@@ -258,7 +262,8 @@ class Uploader:
 
         # レートの文字を追加
         if rate:
-            text_color = (1, 249, 196) if battle == "Xマッチ" else "white"
+            text_color = (1, 249, 196) if battle == "Xマッチ" else \
+                (250, 97, 0) if battle.startswith("バンカラマッチ") else "white"
             path = os.path.join(self.THUMBNAIL_ASSETS_DIR,
                                 "Paintball_Beta.otf")
             font = ImageFont.truetype(path, 70)

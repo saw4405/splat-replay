@@ -9,6 +9,7 @@ import numpy as np
 
 from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, RGBMatcher
 from wrapper.ocr import OCR
+from rate import XP, Udemae
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,11 @@ class Analyzer:
         }
         self._select_xmatch_matcher = HSVMatcher(
             (80, 255, 250), (90, 255, 255), get_full_path("select_xmatch_mask.png"))
+        self._select_bankara_match_matcher = HSVMatcher(
+            (13, 255, 250), (15, 255, 255), get_full_path("select_bankara_match_mask.png"))
+        self._udemae_matchers = create_template_matchers({
+            "S+": "s_plus.png",
+        })
         self._finish_text_matcher = HSVMatcher(
             (0, 0, 0), (179, 255, 50), get_full_path("finish_text_mask.png"))
         self._finish_band_matcher = HSVMatcher(
@@ -175,7 +181,16 @@ class Analyzer:
         M = cv2.getRotationMatrix2D((cols/2, rows/2), angle, 1)
         return cv2.warpAffine(image, M, (cols, rows))
 
-    def x_power(self, image: np.ndarray) -> Optional[Tuple[str, float]]:
+    def udemae(self, image: np.ndarray) -> Optional[Udemae]:
+        if not self._select_bankara_match_matcher.match(image):
+            return None
+
+        if (udemae := self._find(image, self._udemae_matchers)) is None:
+            return None
+
+        return Udemae(udemae)
+
+    def x_power(self, image: np.ndarray) -> Optional[Tuple[str, XP]]:
         if not self._select_xmatch_matcher.match(image):
             return None
 
@@ -204,6 +219,6 @@ class Analyzer:
                 logger.warning(f"Xパワーが異常です: {xp}")
                 return None
 
-            return match_name, xp
+            return match_name, XP(xp)
 
         return None

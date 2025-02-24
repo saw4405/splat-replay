@@ -8,6 +8,7 @@ import numpy as np
 import srt
 
 from wrapper.ffmpeg import FFmpeg
+from rate import RateBase, XP, Udemae
 
 
 @dataclass
@@ -22,7 +23,7 @@ class UploadFile:
     rule: str
     stage: str
     result: str
-    xpower: Optional[float]
+    rate: Optional[RateBase]
     length: float
 
     def __init__(self, path):
@@ -34,7 +35,8 @@ class UploadFile:
         self.start = datetime.datetime.strptime(
             metadata[0], self.DATETIME_FORMAT)
         self.battle, self.rule, self.stage, self.result = metadata[1:5]
-        self.xpower = float(metadata[5]) if len(metadata) == 6 else None
+        self.rate = RateBase.create(
+            metadata[5]) if len(metadata) == 6 else None
 
         self.length = self._get_video_length()
 
@@ -65,13 +67,13 @@ class UploadFile:
         return metadata
 
     @staticmethod
-    def make_file_base_name(start: datetime.datetime, match: str, rule: str, stage: str, result: str, xpower: Optional[float] = None) -> str:
+    def make_file_base_name(start: datetime.datetime, match: str, rule: str, stage: str, result: str, rate: Optional[RateBase] = None) -> str:
         # スケジュール毎に結合できるよう、録画開始日時(バトル開始日時)、マッチ、ルールをファイル名に含める
         # 動画説明に各試合の結果を記載するため、結果もファイル名に含める
         start_str = start.strftime(UploadFile.DATETIME_FORMAT)
         file_base_name = f"{start_str}_{match}_{rule}_{stage}_{result}"
-        if xpower:
-            file_base_name += f"_{xpower}"
+        if rate:
+            file_base_name += f"_{rate}"
         return file_base_name
 
     def set_thumbnail(self, thumbnail: np.ndarray) -> None:
