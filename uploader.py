@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import srt
 
-from wrapper.youtube import Youtube
+from wrapper.youtube import Youtube, PrivacyStatus
 from wrapper.ffmpeg import FFmpeg
 from upload_file import UploadFile
 import utility.os as os_utility
@@ -65,6 +65,10 @@ class Uploader:
 
     def __init__(self):
         super().__init__()
+
+        self._private_status: PrivacyStatus = "private" if os.environ.get(
+            "VIDEO_PUBLIC", "false").lower() == "false" else "public"
+        self._playlist_id = os.environ.get("PLAYLIST_ID")
 
         os.makedirs(self.RECORDED_DIR, exist_ok=True)
         os.makedirs(self.PENDING_DIR, exist_ok=True)
@@ -300,7 +304,7 @@ class Uploader:
             metadata = result.unwrap()
             logger.info(f"YouTubeにアップロードします: {metadata.title}")
             result = self._youtube.upload(
-                path, metadata.title, metadata.comment)
+                path, metadata.title, metadata.comment, ["スプラトゥーン3"], privacy_status=self._private_status)
             if result.is_err():
                 logger.info("YouTubeへのアップロードに失敗しました")
                 continue
@@ -332,6 +336,9 @@ class Uploader:
             finally:
                 if os_utility.remove_file(srt_path).is_err():
                     logger.warning("字幕の削除に失敗しました")
+
+            if self._playlist_id:
+                self._youtube.insert_to_playlist(video_id, self._playlist_id)
 
             if os_utility.remove_file(path).is_err():
                 logger.warning(

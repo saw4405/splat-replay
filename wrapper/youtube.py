@@ -2,7 +2,7 @@ import os
 import gc
 import logging
 import pickle
-from typing import Optional, Union, Literal
+from typing import Optional, Union, Literal, List
 
 import google.auth
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -76,7 +76,7 @@ class Youtube:
         self._save_credentials(credentials)
         return credentials
 
-    def upload(self, path: str, title: str, description: str, category: int = 20, privacy_status: PrivacyStatus = 'private') -> Result[str, str]:
+    def upload(self, path: str, title: str, description: str, tags: List[str] = [], category: int = 20, privacy_status: PrivacyStatus = 'private') -> Result[str, str]:
         """ 動画をアップロードする
 
         Args:
@@ -99,6 +99,7 @@ class Youtube:
                     'snippet': {
                         'title': title,
                         'description': description,
+                        'tags': tags,
                         'categoryId': category
                     },
                     'status': {
@@ -185,3 +186,34 @@ class Youtube:
             if media_file:
                 del media_file
                 gc.collect()
+
+    def insert_to_playlist(self, video_id: str, playlist_id: str) -> Result[None, str]:
+        """ 動画をプレイリストに追加する
+
+        Args:
+            video_id (str): 動画ID
+            playlist_id (str): プレイリストID
+
+        Returns:
+            Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
+        """
+        try:
+            request = self._youtube.playlistItems().insert(
+                part="snippet",
+                body={
+                    'snippet': {
+                        'playlistId': playlist_id,
+                        'resourceId': {
+                            'kind': 'youtube#video',
+                            'videoId': video_id
+                        }
+                    }
+                }
+            )
+            request.execute()
+            return Ok(None)
+
+        except google.auth.exceptions.GoogleAuthError as e:
+            return Err(f"認証に失敗しました: {e}")
+        except Exception as e:
+            return Err(f"アップロードに失敗しました: {e}")
