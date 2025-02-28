@@ -37,7 +37,7 @@
   * OBSのWebSocket機能を有効にしていること [[参考]](https://note.com/213414/n/nd9981ad5bb19)
   * 必要に応じてOBSの録画設定をしておくこと [[参考]](https://obsproject.com/kb/standard-recording-output-guide)
 * Pythonをインストールしていること
-* uvをインストールしていること [参考](https://docs.astral.sh/uv/getting-started/installation/#installation-methods)
+* uvをインストールしていること [[参考]](https://docs.astral.sh/uv/getting-started/installation/#installation-methods)
 * YouTubeの認証情報を取得し、YouTubeAPIを有効化しておくこと [[参照]](https://qiita.com/ny7760/items/5a728fd9e7b40588237c)
   * 認証情報をjsonファイルとしてダウンロードしておく
   * 15分以上の動画をアップロードできるよう、YouTubeアカウントの確認を実施しておく [[参照]](https://www.howtonote.jp/youtube/movie/index4.html#google_vignette)
@@ -48,12 +48,12 @@
 * イカモドキフォントを`thumbnail_assets`フォルダにダウンロードしておくこと [[参照](https://web.archive.org/web/20150906013956/http://aramugi.com/?page_id=807)
   * Project Paintballフォントは二次配布が許可されていたが、イカモドキフォントは二次配布が禁止されているため、各自でダウンロードしてください
   * サムネイル画像を自動生成するためにフォントファイルを使用している
-* 音声認識のモデルを`vosk_model`にダウンロードしておくこと [[参照]](https://alphacephei.com/vosk/models)
-
+* GroqのAPIキーを取得しておくこと [[参照]]([無料で使えるLLM API Groqを使ってみた](https://zenn.dev/mizunny/articles/58be26d25f9589))
 
 ### 初回手順
 
 1. 本リポジトリをクローンする
+
     ```bash
     git clone https://github.com/saw4405/splat-replay.git
     ```
@@ -61,11 +61,12 @@
 2. YouTubeの認証情報を`client_secrets.json`として保存する
 
 3. 仮想環境を作成してアクティベートする
+
     ```bash
     uv venv
     .venv\Scripts\activate
     ```
-    
+
 4. パッケージをインストールする
 
     ```bash
@@ -88,13 +89,14 @@
         * XPの読み込み等でOCRを使うために使用
     * `pywin32`
         * キャプチャボードの接続確認のために使用
-    * `sounddevice`
+    * `pyaudio`
         * マイク入力を取得するために使用
-    * `vosk`
+    * `speechrecognition`
         * 音声を文字起こしするために使用
+    * `groq`
+        * 音声を文字起こしするためと、音声認識の補正をするために使用
 
 5. `.example.env`を`.env`にリネームし、OBSのWebSocketのパスワード等を設定する
-
 
 ### 録画手順
 

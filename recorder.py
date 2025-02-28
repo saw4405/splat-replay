@@ -68,22 +68,23 @@ class Recorder(GracefulThread):
                 "キャプチャーの初期化に失敗しました。\nCAPTURE_DEVICE_INDEXの設定が合っているか確認してください。")
         return result.unwrap()
 
+    def _load_glossary(self) -> list[str]:
+        glossary_path = os.path.join(os.path.dirname(__file__), "glossary.txt")
+        try:
+            with open(glossary_path, encoding="utf-8") as f:
+                return [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            logger.error(f"用語集の読み込みに失敗しました: {e}")
+            return []
+
     def _initialize_transcriber(self) -> Optional[Transcriber]:
         mic_device = os.environ.get("MIC_DEVICE", "")
         if len(mic_device) == 0:
             logger.info("マイクデバイスが設定されていないため、音声認識機能は無効化されます")
             return None
 
-        model_path = os.path.join(os.path.dirname(__file__), "vosk_model")
-
-        try:
-            mic_device = int(mic_device)
-        except:
-            pass
-
-        dictionary = ["リッター", "スパッタリー", "ナイス", "キル", "デス", "味方", "2落ち", "3落ち"]
-
-        return Transcriber(mic_device, model_path, custom_dictionary=dictionary)
+        dictionary = self._load_glossary()
+        return Transcriber(mic_device, custom_dictionary=dictionary)
 
     def register_power_off_callback(self, callback: Callable[[], None]):
         self._power_off_callback = callback
@@ -167,7 +168,7 @@ class Recorder(GracefulThread):
                     self._rank[rule] = xp
 
             if udemae := self._analyzer.udemae(frame):
-                if self._rank.get("ウデマエ", XP(0.0)) != udemae:
+                if self._rank.get("ウデマエ") != udemae:
                     logger.info(f"ウデマエ: {udemae}")
                     self._rank["ウデマエ"] = udemae
 
@@ -243,7 +244,7 @@ class Recorder(GracefulThread):
         self._obs.start_record()
         if self._transcriber:
             logger.info("字幕起こしを開始します")
-            self._transcriber.start_recognition()
+            self._transcriber.start()
         self._record_start_time = time.time()
         self._battle_result = None
 
@@ -260,7 +261,7 @@ class Recorder(GracefulThread):
         path = self._obs.stop_record().unwrap()
         if self._transcriber:
             logger.info("字幕起こしを停止します")
-            self._transcriber.stop_recognition()
+            self._transcriber.stop()
 
         self._matching_start_time = None
 
@@ -277,7 +278,7 @@ class Recorder(GracefulThread):
         srt = None
         if self._transcriber:
             logger.info("字幕起こしを停止します")
-            self._transcriber.stop_recognition()
+            self._transcriber.stop()
             srt = self._transcriber.get_srt()
 
         # マッチ・ルールを分析する

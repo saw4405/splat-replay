@@ -1,237 +1,172 @@
-import logging
-import queue
-import json
+import time
+import os
 import threading
-import datetime
-from typing import Optional, List, Dict, Any, Union, TypedDict, cast
+from typing import List, Dict, Optional, cast
+import queue
+from dataclasses import dataclass
+import logging
 
-from vosk import Model, KaldiRecognizer
-import srt
-import sounddevice as sd
+import speech_recognition as sr
+
+from utility.stopwatch import StopWatch
+from speech_recognizer import SpeechRecognizer
 
 logger = logging.getLogger(__name__)
 
 
-class Device(TypedDict):
-    index: int
-    name: str
-    max_input_channels: int
-    default_samplerate: float
+@dataclass
+class Segment:
+    start: float
+    end: float
+    text: str
 
 
 class Transcriber:
-    def __init__(self, device: Union[int, str], model_path: str, sample_rate: int = 16000, block_size: int = 8000, gap_threshold: float = 1.0, custom_dictionary: Optional[List[str]] = None) -> None:
-        """
-        :param device: マイクのデバイスインデックス(int)、またはデバイス名(str)
-        :param model_path: Vosk のモデルディレクトリのパス
-        :param sample_rate: 録音サンプルレート (例: 16000)
-        :param block_size: １回の読み込みで取得するフレーム数
-        :param gap_threshold: 単語間の無音がこの秒数以上ならセグメントの区切りとする
-        :param custom_dictionary: 独自に定義した辞書 (例: ["word1", "word2", ...])
-        """
-        self.device_index = self._find_device_index(device)
-        self.model = Model(model_path)
-        self.sample_rate = sample_rate
-        self.block_size = block_size
-        self.gap_threshold = gap_threshold
-        self.custom_dictionary = json.dumps(
-            custom_dictionary) if custom_dictionary else None
+    LISTEN_TIMEOUT: int = 1
 
-        self._recognizer: Optional[KaldiRecognizer] = None
-        self._queue: queue.Queue = queue.Queue()
-        self._segments: List[List[Dict[str, Any]]] = []  # 各セグメントの型定義
-        self._running: bool = False
-        self._stream: Any = None
-        self._thread: Optional[threading.Thread] = None
+    def __init__(self, device: str, language: str = "ja-JP", phrase_time_limit: float = 3, custom_dictionary: List[str] = []):
+        microphone_index = self._get_microphone_index(device)
+        self._microphone = sr.Microphone(device_index=microphone_index)
+        self.phrase_time_limit = phrase_time_limit
+        self._speech_recognizer = SpeechRecognizer(language, custom_dictionary)
+        self._stopwatch = StopWatch()
+        self._recognizer = sr.Recognizer()
+        self._is_paused: bool = False
+        self._segments: List[Segment] = []
+        self._audio_queue = queue.Queue()
+        self._recording_event = threading.Event()
+        self._recording_thread: Optional[threading.Thread] = None
+        self._recognition_thread: Optional[threading.Thread] = None
 
-    @staticmethod
-    def get_audio_devices() -> List[Device]:
-        """
-        使用可能なオーディオデバイスを一覧表示する
-        """
-        devices: List[Device] = []
-        for dev in sd.query_devices():
-            dev_dict = cast(Dict[str, Any], dev)
-            if "BOYA" in dev_dict["name"]:
-                pass
-            devices.append({
-                "index": dev_dict["index"],
-                "name": dev_dict["name"],
-                "max_input_channels": dev_dict["max_input_channels"],
-                "default_samplerate": dev_dict["default_samplerate"]
-            })
-        return devices
+    def _get_microphone_index(self, device: str) -> int:
+        for index, name in enumerate(sr.Microphone.list_microphone_names()):
+            if device.lower() in name.lower():
+                return index
+        raise ValueError(f"指定されたデバイス名を含むマイクが見つかりません: {device}")
 
-    def _find_device_index(self, device: Union[int, str]) -> Optional[int]:
-        """
-        デバイスインデックスを取得する
-        """
-        if isinstance(device, int):
-            return device
-        for dev in sd.query_devices():
-            dev_dict = cast(Dict[str, Any], dev)
-            if device in dev_dict["name"]:
-                logger.info(f"Device {dev_dict["index"]}: {dev_dict['name']}")
-                return dev_dict["index"]
-        return None
+    def _listen_for_audio(self, source) -> Optional[sr.AudioData]:
+        try:
+            audio = self._recognizer.listen(
+                source,
+                timeout=self.LISTEN_TIMEOUT,
+                phrase_time_limit=self.phrase_time_limit
+            )
+            # stream=Falseの場合、audioは常に sr.AudioDataとなる
+            return cast(sr.AudioData, audio)
+        except sr.WaitTimeoutError:
+            return None
+        except Exception as e:
+            logging.error(f"リスニングエラー: {e}")
+            return None
 
-    def _process_result(self, result_json: Dict[str, Any]) -> List[List[Dict[str, Any]]]:
-        """
-        Vosk の認識結果 JSON から単語情報（"result" リスト）を取得し、
-        単語間の間隔が gap_threshold 以上のときにセグメント分割を行う。
-        """
-        if "result" not in result_json:
-            return []
-        words: List[Dict[str, Any]] = result_json["result"]
-        segments: List[List[Dict[str, Any]]] = []
-        if not words:
-            return segments
-        current_segment = [words[0]]
-        for w in words[1:]:
-            # 前の単語の終了時刻と今回の開始時刻の差が gap_threshold 以上なら区切る
-            if w["start"] - current_segment[-1]["end"] > self.gap_threshold:
-                segments.append(current_segment)
-                current_segment = [w]
-            else:
-                current_segment.append(w)
-        if current_segment:
-            segments.append(current_segment)
-        return segments
+    def _recording_loop(self):
+        with self._microphone as source:
+            self._recognizer.adjust_for_ambient_noise(source)
+            while not self._recording_event.is_set():
+                if self._is_paused:
+                    time.sleep(0.1)
+                    continue
 
-    def _segments_to_srt(self, segments: List[List[Dict[str, Any]]]) -> str:
-        """
-        srt パッケージを使用して、字幕のリストを SRT フォーマットに変換する
-        """
-        subtitles: List[srt.Subtitle] = []
-        for index, seg in enumerate(segments, start=1):
-            start_time = datetime.timedelta(seconds=seg[0]["start"])
-            end_time = datetime.timedelta(seconds=seg[-1]["end"])
-            text = "".join(word["word"] for word in seg)
-            subtitles.append(srt.Subtitle(index, start_time, end_time, text))
+                audio = self._listen_for_audio(source)
+                if audio is None:
+                    continue
 
-        return srt.compose(subtitles)
+                elapsed_time = self._stopwatch.elapsed()
+                duration = self.get_audio_duration(audio)
+                start = max(elapsed_time - duration, 0)
+                end = elapsed_time
 
-    def _audio_callback(self, indata: Any, frames: int, time_info: Dict[str, Any], status: Any) -> None:
-        if status:
-            logger.debug(f"Error: {status}")
-        self._queue.put(bytes(indata))
+                self._audio_queue.put((audio, start, end))
 
-    def _recognition_loop(self) -> None:
-        """
-        別スレッドで回す認識ループ。キューからデータを取得し、
-        Vosk で音声認識を行い、結果から字幕用セグメントを抽出する。
-        """
-        if self._recognizer is None:
-            raise ValueError("Recognizer is not initialized")
-
-        while self._running:
-            if self._queue.empty():
+    def _recognition_loop(self):
+        while not self._recording_event.is_set():
+            if self._audio_queue.empty():
+                time.sleep(0.1)
                 continue
-            data = self._queue.get(timeout=0.1)
 
-            if self._recognizer.AcceptWaveform(data):
-                result_str = self._recognizer.Result()
-                result = json.loads(result_str)
-                segments = self._process_result(result)
-                self._segments.extend(segments)
-                try:
-                    if result.get("text", ""):
-                        logger.info(f"音声入力:{result.get("text", "")}")
-                        print(f"音声入力:{result.get("text", "")}")
-                except Exception as e:
-                    logger.error(f"音声入力エラー: {e}")
+            audio, start, end = self._audio_queue.get(timeout=1)
+            result = self._speech_recognizer.recognize(audio)
+            if result.is_err():
+                logging.error(result.unwrap_err())
+                continue
 
-        # ループ終了後、最終結果をフラッシュする
-        final_result_str = self._recognizer.FinalResult()
-        final_result = json.loads(final_result_str)
-        segments = self._process_result(final_result)
-        self._segments.extend(segments)
+            self._segments.append(Segment(start, end, result.unwrap()))
 
-    def start_recognition(self) -> None:
-        """
-        音声認識処理を開始する。マイクからの入力を取得し、別スレッドで認識ループを実行する。
-        """
-        if self._running:
-            logger.debug("既に音声認識中です")
-            return
-        self._running = True
-        self._segments = []
-        self._queue.queue.clear()
+    def start(self):
+        self._stopwatch.reset()
+        self._stopwatch.start()
+        self._recording_event.clear()
+        self._segments.clear()
+        self._recording_thread = threading.Thread(
+            target=self._recording_loop, daemon=True)
+        self._recognition_thread = threading.Thread(
+            target=self._recognition_loop, daemon=True)
+        self._recording_thread.start()
+        self._recognition_thread.start()
 
-        if self.custom_dictionary:
-            self._recognizer = KaldiRecognizer(
-                self.model, self.sample_rate, self.custom_dictionary)
-        else:
-            self._recognizer = KaldiRecognizer(self.model, self.sample_rate)
-        self._recognizer.SetWords(True)  # 単語ごとの開始・終了タイムスタンプを取得する
+    def pause(self):
+        if not self._is_paused:
+            self._stopwatch.pause()
+            self._is_paused = True
 
-        self._stream = sd.RawInputStream(samplerate=self.sample_rate,
-                                         blocksize=self.block_size,
-                                         dtype='int16',
-                                         channels=1,
-                                         device=self.device_index,
-                                         callback=self._audio_callback)
+    def resume(self):
+        if self._is_paused:
+            self._stopwatch.resume()
+            self._is_paused = False
 
-        self._stream.start()
-        self._thread = threading.Thread(target=self._recognition_loop)
-        self._thread.start()
-        logger.info("音声認識を開始しました")
-
-    def stop_recognition(self) -> None:
-        """
-        音声認識処理を停止する。マイクストリームを閉じ、認識ループのスレッドを終了する。
-        """
-        if not self._running:
-            logger.debug("音声認識中ではありません")
-            return
-        self._running = False
-        self._stream.stop()
-        self._stream.close()
-        if self._thread:
-            self._thread.join()
-        logger.info("音声認識を停止しました")
+    def stop(self):
+        self._recording_event.set()
+        self._stopwatch.stop()
+        if self._recording_thread:
+            self._recording_thread.join()
+        if self._recognition_thread:
+            self._recognition_thread.join()
 
     def get_srt(self) -> str:
-        """
-        これまでに取得した認識結果から SRT 形式のテキストを返す
-        """
-        return self._segments_to_srt(self._segments)
+        self.stop()
 
-    def save_srt(self, filename: str = "output.srt", encoding: str = "utf-8") -> None:
-        """
-        SRT テキストをファイルに保存する
-        """
-        srt_content = self.get_srt()
-        with open(filename, "w", encoding=encoding) as f:
-            f.write(srt_content)
-        logger.info(f"SRT ファイルを保存しました: {filename}")
+        srt_content: List[str] = []
+        for index, segment in enumerate(self._segments, 1):
+            start = self.format_timedelta(segment.start)
+            end = self.format_timedelta(segment.end)
+            text = segment.text
+
+            srt_content.append(f"{index}\n{start} --> {end}\n{text}\n\n")
+
+        return "\n".join(srt_content)
+
+    @staticmethod
+    def get_audio_duration(audio: sr.AudioData) -> float:
+        frames = len(audio.frame_data) / audio.sample_width
+        return frames / audio.sample_rate
+
+    @staticmethod
+    def format_timedelta(seconds: float) -> str:
+        total_seconds = int(seconds)
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        secs = total_seconds % 60
+        milliseconds = int((seconds - total_seconds) * 1000)
+        return f"{hours:02}:{minutes:02}:{secs:02},{milliseconds:03}"
 
 
-# 利用例
-if __name__ == "__main__":
-    devices = Transcriber.get_audio_devices()
-    print("利用可能なオーディオデバイス:")
-    for device in devices:
-        print(
-            f"  {device['index']}: {device['name']} ({device['max_input_channels']} channels) {device['default_samplerate']} Hz")
+def main():
+    mic_device = os.environ.get("MIC_DEVICE", "マイク配列")
+    transcriber = Transcriber(mic_device)
+    transcriber.start()
+    print("録音中...")
 
-    # デバイスインデックスを入力する
     try:
-        device_index = int(input("使用するデバイスのインデックスを入力してください: "))
-    except ValueError:
-        print("有効な数値を入力してください。")
-        exit(1)
+        while True:
+            # キーボード入力を受け付ける
+            input_str = input()
+            if input_str.lower() == "q":
+                break
+    finally:
+        transcriber.stop()
+        srt = transcriber.get_srt()
+        print(srt)
 
-    recognizer = Transcriber(model_path="vosk_model",
-                             device=device_index)
-    while True:
-        try:
-            recognizer.start_recognition()
-            print("音声認識中です。終了するには Enter キーを押してください。")
-            input()  # Enter キーが押されるまで認識継続
-        except KeyboardInterrupt:
-            pass
-        finally:
-            recognizer.stop_recognition()
-            recognizer.save_srt("output.srt")
-            print("音声認識を終了しました")
+
+if __name__ == "__main__":
+    main()
