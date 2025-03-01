@@ -24,8 +24,18 @@ class Rectangle:
 
 class Analyzer:
     def __init__(self):
-        self._ocr = OCR(os.environ["TESSERACT_PATH"])
+        self._init_ocr()
         self._init_matchers()
+
+    def _init_ocr(self):
+        tesseract_path = os.environ.get("TESSERACT_PATH")
+
+        if tesseract_path and os.path.exists(tesseract_path):
+            self._ocr = OCR(tesseract_path)
+        else:
+            logger.warning(
+                "環境変数TESSERACT_PATHが設定されていないか、指定されたパスが存在しません。OCR機能は使用できません。")
+            self._ocr = None
 
     def _init_matchers(self):
         def get_full_path(filename: str) -> str:
@@ -192,6 +202,9 @@ class Analyzer:
         return Udemae(udemae)
 
     def x_power(self, image: np.ndarray) -> Optional[Tuple[str, XP]]:
+        if self._ocr is None:
+            return None
+
         if not self._select_xmatch_matcher.match(image):
             return None
 
