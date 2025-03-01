@@ -120,7 +120,7 @@ class Uploader:
         day_str = day.strftime("'%y.%m.%d")
         time_str = time.strftime("%H").lstrip("0")
 
-        title = f"{battle}{rate} {rule} {win_count}勝{lose_count}敗 {day_str} {time_str}時～"
+        title = f"{battle}{rate} {rule} {win_count}勝{lose_count}敗 {day_str} {time_str}時～ ※概要欄にチャプター有"
         return title, description
 
     def _split_by_time_ranges(self, files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
@@ -294,51 +294,85 @@ class Uploader:
         thumbnail.save(buf, format='PNG')
         return buf.getvalue()
 
+    def _upload_video(self, path: str) -> Optional[str]:
+        result = FFmpeg.read_metadata(path)
+        if result.is_err():
+            logger.error("アップロードする動画のメタデータ取得に失敗しました")
+            return None
+
+        metadata = result.unwrap()
+        logger.info(f"YouTubeにアップロードします: {metadata.title}")
+        result = self._youtube.upload(
+            path, metadata.title, metadata.comment, ["スプラトゥーン3"], privacy_status=self._private_status)
+        if result.is_err():
+            logger.info(f"YouTubeへのアップロードに失敗しました: {result.unwrap_err()}")
+            return None
+
+        video_id = result.unwrap()
+        logger.info(f"YouTubeにアップロードしました: {video_id}")
+        return video_id
+
+    def _set_thumbnail(self, path: str, video_id: str):
+        result = FFmpeg.get_thumbnail(path)
+        if result.is_err():
+            logger.warning(f"サムネイルの取得に失敗しました: {result.unwrap_err()}")
+            return
+
+        thumbnail_data = result.unwrap()
+        thumbnail_path = os.path.join(self.PENDING_DIR, f"{video_id}.png")
+        try:
+            with open(thumbnail_path, "wb") as f:
+                f.write(thumbnail_data)
+            result = self._youtube.set_thumbnail(video_id, thumbnail_path)
+            if result.is_err():
+                logger.warning(
+                    f"サムネイルのアップロードに失敗しました: {result.unwrap_err()}")
+        except Exception as e:
+            logger.warning(f"サムネイルのアップロードに失敗しました: {e}")
+        finally:
+            if os_utility.remove_file(thumbnail_path).is_err():
+                logger.warning(f"サムネイルの削除に失敗しました: {thumbnail_path}")
+
+    def _insert_caption(self, path: str, video_id: str):
+        result = FFmpeg.get_subtitle(path)
+        if result.is_err():
+            logger.warning(f"字幕の取得に失敗しました: {result.unwrap_err()}")
+            return
+
+        srt = result.unwrap()
+        srt_path = os.path.join(self.PENDING_DIR, f"{video_id}.srt")
+        try:
+            with open(srt_path, "w", encoding="utf-8") as f:
+                f.write(srt)
+            result = self._youtube.insert_caption(video_id, srt_path, "ひとりごと")
+            if result.is_err():
+                logger.warning(
+                    f"字幕のアップロードに失敗しました: {result.unwrap_err()}")
+        except Exception as e:
+            logger.warning(f"字幕のアップロードに失敗しました: {e}")
+        finally:
+            if os_utility.remove_file(srt_path).is_err():
+                logger.warning(f"字幕の削除に失敗しました: {srt_path}")
+
+    def _insert_to_playlist(self, video_id: str):
+        if not self._playlist_id:
+            logger.warning("プレイリストIDが指定されていません")
+            return
+
+        result = self._youtube.insert_to_playlist(video_id, self._playlist_id)
+        if result.is_err():
+            logger.warning(f"プレイリストへの挿入に失敗しました: {result.unwrap_err()}")
+
     def _upload_to_youtube(self):
         files = glob.glob(f'{self.PENDING_DIR}/*.*')
         for path in files:
-            result = FFmpeg.read_metadata(path)
-            if result.is_err():
-                logger.error("アップロードする動画のメタデータ取得に失敗しました")
+            video_id = self._upload_video(path)
+            if video_id is None:
                 continue
-            metadata = result.unwrap()
-            logger.info(f"YouTubeにアップロードします: {metadata.title}")
-            result = self._youtube.upload(
-                path, metadata.title, metadata.comment, ["スプラトゥーン3"], privacy_status=self._private_status)
-            if result.is_err():
-                logger.info("YouTubeへのアップロードに失敗しました")
-                continue
-            logger.info("YouTubeにアップロードしました")
-            video_id = result.unwrap()
 
-            thumbnail_path = os.path.join(self.PENDING_DIR, f"{video_id}.png")
-            try:
-                result = FFmpeg.get_thumbnail(path)
-                if result.is_ok():
-                    with open(thumbnail_path, "wb") as f:
-                        f.write(result.unwrap())
-                    self._youtube.set_thumbnail(video_id, thumbnail_path)
-            except Exception as e:
-                logger.warning(f"サムネイルのアップロードに失敗しました: {e}")
-            finally:
-                if os_utility.remove_file(thumbnail_path).is_err():
-                    logger.warning("サムネイルの削除に失敗しました")
-
-            srt_path = os.path.join(self.PENDING_DIR, f"{video_id}.srt")
-            try:
-                result = FFmpeg.get_subtitle(path)
-                if result.is_ok():
-                    with open(srt_path, "w", encoding="utf-8") as f:
-                        f.write(result.unwrap())
-                    self._youtube.insert_caption(video_id, srt_path, "ひとりごと")
-            except Exception as e:
-                logger.warning(f"字幕のアップロードに失敗しました: {e}")
-            finally:
-                if os_utility.remove_file(srt_path).is_err():
-                    logger.warning("字幕の削除に失敗しました")
-
-            if self._playlist_id:
-                self._youtube.insert_to_playlist(video_id, self._playlist_id)
+            self._set_thumbnail(path, video_id)
+            self._insert_caption(path, video_id)
+            self._insert_to_playlist(video_id)
 
             if os_utility.remove_file(path).is_err():
                 logger.warning(
