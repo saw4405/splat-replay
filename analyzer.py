@@ -1,6 +1,6 @@
 import os
 import hashlib
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Union
 from dataclasses import dataclass
 import logging
 
@@ -32,8 +32,8 @@ class Analyzer:
             directory = os.path.join(os.path.dirname(__file__), "templates")
             return os.path.join(directory, filename)
 
-        def create_template_matchers(filenames: Dict[str, str]) -> Dict[str, TemplateMatcher]:
-            return {name: TemplateMatcher(get_full_path(filename)) for name, filename in filenames.items()}
+        def create_template_matchers(filenames: Dict[str, Union[str, Tuple[str, str]]]) -> Dict[str, TemplateMatcher]:
+            return {name: TemplateMatcher(get_full_path(filename)) if isinstance(filename, str) else TemplateMatcher(get_full_path(filename[0]), get_full_path(filename[1])) for name, filename in filenames.items()}
 
         self._matching_matcher = TemplateMatcher(get_full_path("matching.png"))
         self._wait_matcher = TemplateMatcher(get_full_path("wait.png"))
@@ -110,6 +110,7 @@ class Analyzer:
             (13, 255, 250), (15, 255, 255), get_full_path("select_bankara_match_mask.png"))
         self._udemae_matchers = create_template_matchers({
             "S+": "s_plus.png",
+            "S": ("s.png", "s_mask.png"),
         })
         self._finish_text_matcher = HSVMatcher(
             (0, 0, 0), (179, 255, 50), get_full_path("finish_text_mask.png"))
