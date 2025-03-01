@@ -29,9 +29,9 @@ class Youtube:
         self.SCOPES = ['https://www.googleapis.com/auth/youtube.upload',
                        'https://www.googleapis.com/auth/youtube.force-ssl']
 
-        credentials = self._get_credentials()
+        self._credentials = self._get_credentials()
         self._youtube = build(
-            self.API_NAME, self.API_VERSION, credentials=credentials)
+            self.API_NAME, self.API_VERSION, credentials=self._credentials)
 
     def _load_credentials(self) -> Optional[Credentials]:
         """ 認証情報をファイルからロードする
@@ -68,6 +68,7 @@ class Youtube:
                     self._save_credentials(credentials)
                 return credentials
             except:
+                # 認証更新できなかった場合は新規認証を行う
                 pass
 
         flow = InstalledAppFlow.from_client_secrets_file(
@@ -75,6 +76,13 @@ class Youtube:
         credentials = flow.run_local_server(port=8080)
         self._save_credentials(credentials)
         return credentials
+
+    def _ensure_credentials(self):
+        """ 認証情報が有効であることを確認する """
+        if self._credentials.expired:
+            self._credentials = self._get_credentials()
+            self._youtube = build(
+                self.API_NAME, self.API_VERSION, credentials=self._credentials)
 
     def upload(self, path: str, title: str, description: str, tags: List[str] = [], category: int = 20, privacy_status: PrivacyStatus = 'private') -> Result[str, str]:
         """ 動画をアップロードする
@@ -89,6 +97,8 @@ class Youtube:
         Returns:
             Result[str, str]: 成功した場合はOkに動画IDが格納され、失敗した場合はErrにエラーメッセージが格納される
         """
+        self._ensure_credentials()
+
         media_file = None
         try:
             media_file = MediaFileUpload(
@@ -130,6 +140,8 @@ class Youtube:
         Returns:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
+        self._ensure_credentials()
+
         media_file = None
         try:
             media_file = MediaFileUpload(image_path)
@@ -161,6 +173,8 @@ class Youtube:
         Returns:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
+        self._ensure_credentials()
+
         media_file = None
         try:
             media_file = MediaFileUpload(caption_path)
@@ -197,6 +211,8 @@ class Youtube:
         Returns:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
+        self._ensure_credentials()
+
         try:
             request = self._youtube.playlistItems().insert(
                 part="snippet",
