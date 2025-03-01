@@ -3,7 +3,7 @@ import logging
 import time
 import datetime
 import subprocess
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 import win32gui
 
 import psutil
@@ -34,7 +34,8 @@ class Obs:
         except:
             return None
 
-    def __init__(self, path: str, host: str, port: int, password: str):
+    def __init__(self, path: str, host: str, port: int, password: str, on_disconnect: Optional[Callable[[obsws], None]] = None):
+        """ OBSの操作を行うクラス """
         self.directory = os.path.dirname(path)
         self.file = os.path.basename(path)
         self.host = host
@@ -42,7 +43,8 @@ class Obs:
         self.password = password
 
         self._process = self._start_obs_process()
-        self._ws = obsws(self.host, self.port, self.password)
+        self._ws = obsws(self.host, self.port, self.password,
+                         on_disconnect=on_disconnect)
         self._connect_obs()
 
     def _is_running(self) -> bool:
@@ -87,33 +89,39 @@ class Obs:
 
         return process
 
+    @property
+    def is_connected(self) -> bool:
+        """ OBSに接続されているか確認する """
+        return self._ws.ws is not None and self._ws.ws.connected
+
     def _connect_obs(self):
         """ OBSに接続する """
-        if not self._ws.ws or not self._ws.ws.connected:
+        if not self.is_connected:
             self._ws.connect()
 
     def close(self):
         """ OBSを終了する """
-        self.stop_virtual_cam()
-        self._ws.disconnect()
+        if self.is_connected:
+            self.stop_virtual_cam()
+            self._ws.disconnect()
         if self._process:
             self._process.terminate()
 
-    def _request_obs(self, request: Baserequests) -> Baserequests:
+    def _request_obs(self, request: Baserequests) -> Result[Baserequests, str]:
         """ OBSにリクエストを送信する
 
         Args:
             request (Baserequests): リクエスト
 
         Returns:
-            Baserequests: レスポンス
+            Result[Baserequests, str]: レスポンス
         """
-        # 途中でOBSが終了している場合に備えて、起動と接続を確認する
-        self._process = self._start_obs_process() or self._process
-        self._connect_obs()
+        if not self.is_connected:
+            return Err("OBSに接続されていません")
 
         result = self._ws.call(request)
-        return result
+
+        return Ok(result)
 
     def start_virtual_cam(self) -> Result[None, str]:
         """ 仮想カメラを起動する
@@ -122,12 +130,19 @@ class Obs:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
         result = self._request_obs(requests.GetVirtualCamStatus())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
 
+        # 既に起動している場合は何もしない
         status = result.datain.get("outputActive", False)
         if status:
             return Ok(None)
 
         result = self._request_obs(requests.StartVirtualCam())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
         if not result.status:
             return Err("仮想カメラの起動に失敗しました")
 
@@ -140,26 +155,38 @@ class Obs:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
         result = self._request_obs(requests.GetVirtualCamStatus())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
+
+        # 既に停止している場合は何もしない
         status = result.datain.get("outputActive", False)
         if status == False:
             return Ok(None)
 
         result = self._request_obs(requests.StopVirtualCam())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
         if not result.status:
             return Err("仮想カメラの停止に失敗しました")
 
         return Ok(None)
 
-    def _get_record_status(self) -> Tuple[bool, bool]:
+    def _get_record_status(self) -> Result[Tuple[bool, bool], str]:
         """ 録画の状態を取得する
 
         Returns:
-            Tuple[bool, bool]: 録画中かどうかと一時停止中かどうか
+            Result[Tuple[bool, bool], str]: 録画中かどうかと一時停止中かどうか
         """
         result = self._request_obs(requests.GetRecordStatus())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
+
         active = result.datain.get("outputActive", False)
         paused = result.datain.get("outputPaused", False)
-        return active, paused
+        return Ok((active, paused))
 
     def start_record(self) -> Result[None, str]:
         """ 録画を開始する
@@ -167,11 +194,18 @@ class Obs:
         Returns:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
-        active, _ = self._get_record_status()
+        result = self._get_record_status()
+        if result.is_err():
+            return Err(result.unwrap_err())
+
+        active, _ = result.unwrap()
         if active:
             return Ok(None)
 
         result = self._request_obs(requests.StartRecord())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
         if not result.status:
             return Err("録画の開始に失敗しました")
 
@@ -183,11 +217,18 @@ class Obs:
         Returns:
             Result[str, str]: 成功した場合はOkに録画ファイルのパスが格納され、失敗した場合はErrにエラーメッセージが格納される
         """
-        active, _ = self._get_record_status()
+        result = self._get_record_status()
+        if result.is_err():
+            return Err(result.unwrap_err())
+
+        active, _ = result.unwrap()
         if not active:
             return Err("録画は開始されていません")
 
         result = self._request_obs(requests.StopRecord())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
         if not result.status:
             return Err("録画の停止に失敗しました")
 
@@ -203,11 +244,18 @@ class Obs:
         Returns:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
-        _, paused = self._get_record_status()
+        result = self._get_record_status()
+        if result.is_err():
+            return Err(result.unwrap_err())
+
+        _, paused = result.unwrap()
         if paused:
             return Ok(None)
 
         result = self._request_obs(requests.PauseRecord())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
         if not result.status:
             return Err("録画の一時停止に失敗しました")
 
@@ -219,11 +267,18 @@ class Obs:
         Returns:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
-        _, paused = self._get_record_status()
+        result = self._get_record_status()
+        if result.is_err():
+            return Err(result.unwrap_err())
+
+        _, paused = result.unwrap()
         if not paused:
             return Ok(None)
 
         result = self._request_obs(requests.ResumeRecord())
+        if result.is_err():
+            return Err(result.unwrap_err())
+        result = result.unwrap()
         if not result.status:
             return Err("録画の再開に失敗しました")
 

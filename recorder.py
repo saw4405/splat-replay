@@ -46,12 +46,16 @@ class Recorder(GracefulThread):
 
         self._power_off_callback: Optional[Callable[[], None]] = None
 
+    def _on_disconnect_obs(self, _):
+        logger.error("OBSとの接続が切れたので、Recorderを停止します")
+        self.stop()
+
     def _initialize_obs(self) -> Obs:
         path = os.environ["OBS_PATH"]
         host = os.environ["OBS_WS_HOST"]
         port = int(os.environ["OBS_WS_PORT"])
         password = os.environ["OBS_WS_PASSWORD"]
-        obs = Obs(path, host, port, password)
+        obs = Obs(path, host, port, password, self._on_disconnect_obs)
 
         # バトル開始等の画像判定への入力として仮想カメラを起動する
         if obs.start_virtual_cam().is_err():
