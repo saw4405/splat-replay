@@ -258,6 +258,37 @@ class FFmpeg:
         return Ok(result.stdout)
 
     @staticmethod
+    def change_volume(video_path: str, volume: float) -> Result[None, str]:
+        """ 動画ファイルの音量を変更する
+
+        Args:
+            video_path (str): 動画ファイルのパス
+            volume (float): 変更後の音量（例: 1.0で元の音量、1.5で150%）
+
+        Returns:
+            Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージを格納
+        """
+        extension = os.path.splitext(video_path)[1]
+        out_file = f"temp{extension}"
+        directory = os.path.dirname(video_path)
+        os.chdir(directory)
+        command = [
+            "ffmpeg",
+            "-i", video_path,
+            "-af", f"volume={volume}",
+            "-c:v", "copy",
+            out_file
+        ]
+        result = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8")
+        if result.returncode != 0:
+            return Err(f"ボリューム変更に失敗しました: {result.stderr}")
+
+        os_utility.remove_file(video_path)
+        os_utility.rename_file(out_file, video_path)
+        return Ok(None)
+
+    @staticmethod
     def _find_streams(video_path: str, codec_type: Literal["video", "audio", "subtitle"], codec_name: str) -> Result[List[int], str]:
         """ 動画ファイルから指定されたコーデックのストリームを探す
 

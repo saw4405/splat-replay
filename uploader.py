@@ -69,6 +69,8 @@ class Uploader:
         self._private_status: PrivacyStatus = "private" if os.environ.get(
             "VIDEO_PUBLIC", "false").lower() == "false" else "public"
         self._playlist_id = os.environ.get("PLAYLIST_ID")
+        self.volume_multiplier = float(
+            os.environ.get("VOLUME_MULTIPLIER", 1.0))
 
         os.makedirs(self.RECORDED_DIR, exist_ok=True)
         os.makedirs(self.PENDING_DIR, exist_ok=True)
@@ -366,6 +368,8 @@ class Uploader:
     def _upload_to_youtube(self):
         files = glob.glob(f'{self.PENDING_DIR}/*.*')
         for path in files:
+            FFmpeg.change_volume(path, self.volume_multiplier)
+
             video_id = self._upload_video(path)
             if video_id is None:
                 continue
