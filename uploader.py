@@ -122,7 +122,7 @@ class Uploader:
         day_str = day.strftime("'%y.%m.%d")
         time_str = time.strftime("%H").lstrip("0")
 
-        title = f"{battle}{rate} {rule} {win_count}勝{lose_count}敗 {day_str} {time_str}時～ ※概要欄にチャプター有"
+        title = f"{battle}{rate} {rule} {win_count}勝{lose_count}敗 {day_str} {time_str}時～"
         return title, description
 
     def _split_by_time_ranges(self, files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
@@ -276,21 +276,26 @@ class Uploader:
             draw.text((1125, 230), rate, fill=text_color, font=font)
 
         # ステージ画像を追加
-        path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{stage1}.png")
-        if stage1 and os.path.exists(path):
-            stage1_image = Image.open(path).convert("RGBA")
-            stage1_image = stage1_image.resize((960, 168))
-            thumbnail.paste(stage1_image, (860, 360), stage1_image)
+        if stage1:
+            path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{stage1}.png")
+            if os.path.exists(path):
+                stage1_image = Image.open(path).convert("RGBA")
+                stage1_image = stage1_image.resize((960, 168))
+                thumbnail.paste(stage1_image, (860, 360), stage1_image)
+            else:
+                logger.warning(f"ステージ画像が見つかりません: {stage1}")
         else:
-            logger.warning(f"ステージ画像が見つかりません: {stage1}")
+            logger.warning("ステージを検出できていません")
 
-        path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{stage2}.png")
-        if stage2 and os.path.exists(path):
-            stage2_image = Image.open(path).convert("RGBA")
-            stage2_image = stage2_image.resize((960, 168))
-            thumbnail.paste(stage2_image, (860, 540), stage2_image)
-        else:
-            logger.warning(f"ステージ画像が見つかりません: {stage2}")
+        if stage2:
+            path = os.path.join(self.THUMBNAIL_ASSETS_DIR, f"{stage2}.png")
+            if os.path.exists(path):
+                stage2_image = Image.open(path).convert("RGBA")
+                stage2_image = stage2_image.resize((960, 168))
+                thumbnail.paste(stage2_image, (860, 540), stage2_image)
+            else:
+                logger.warning(f"ステージ画像が見つかりません: {stage2}")
+        # 2つ目のステージがないことはあるので、警告は出さない
 
         buf = io.BytesIO()
         thumbnail.save(buf, format='PNG')
