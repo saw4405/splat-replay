@@ -275,8 +275,9 @@ class FFmpeg:
         command = [
             "ffmpeg",
             "-i", video_path,
-            "-af", f"volume={volume}",
+            "-map", "0",
             "-c:v", "copy",
+            "-af", f"volume={volume}",
             out_file
         ]
         result = subprocess.run(
