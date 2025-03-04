@@ -286,7 +286,11 @@ class Recorder(GracefulThread):
             self._transcriber.stop()
 
         if self._obs:
-            path = self._obs.stop_record().unwrap()
+            result = self._obs.stop_record()
+            if result.is_err():
+                logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
+                return
+            path = result.unwrap()
             if os_utility.remove_file(path).is_err():
                 logger.warning(f"中断された録画ファイルの削除に失敗しました")
 
@@ -301,34 +305,32 @@ class Recorder(GracefulThread):
             self._transcriber.stop()
             srt = self._transcriber.get_srt()
 
-        # マッチ・ルールを分析する
-        battle_result = self._battle_result or ""
-        match = self._analyzer.match_name(frame) or ""
-        logger.info(f"マッチ: {match}")
-        rule = self._analyzer.rule_name(frame) or ""
-        logger.info(f"ルール: {rule}")
-        stage = self._analyzer.stage_name(frame) or ""
-        logger.info(f"ステージ: {stage}")
+        if self._obs:
+            result = self._obs.stop_record()
+            if result.is_err():
+                logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
+                return
+            path = result.unwrap()
 
-        rank_key = rule if match == "Xマッチ" else "ウデマエ"
-        rank = self._rank.get(rank_key, None)
+            # マッチ・ルールを分析する
+            battle_result = self._battle_result or ""
+            match = self._analyzer.match_name(frame) or ""
+            logger.info(f"マッチ: {match}")
+            rule = self._analyzer.rule_name(frame) or ""
+            logger.info(f"ルール: {rule}")
+            stage = self._analyzer.stage_name(frame) or ""
+            logger.info(f"ステージ: {stage}")
 
-        if not self._obs:
-            return
+            rank_key = rule if match == "Xマッチ" else "ウデマエ"
+            rank = self._rank.get(rank_key, None)
 
-        result = self._obs.stop_record()
-        if result.is_err():
-            logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
-            return
-        path = result.unwrap()
-
-        # アップロードキューに追加
-        start_datetime = self._matching_start_time or \
-            Obs.extract_start_datetime(path) or \
-            datetime.datetime.now()
-        Uploader.queue(path, start_datetime, match, rule,
-                       stage, battle_result, rank, frame, srt)
-        logger.info("アップロードキューに追加しました")
+            # アップロードキューに追加
+            start_datetime = self._matching_start_time or \
+                Obs.extract_start_datetime(path) or \
+                datetime.datetime.now()
+            Uploader.queue(path, start_datetime, match, rule,
+                           stage, battle_result, rank, frame, srt)
+            logger.info("アップロードキューに追加しました")
 
         self._matching_start_time = None
         self._rank = {}  # バトル後はXPが更新されている可能性があるので、いったんリセットする
