@@ -22,8 +22,9 @@ PrivacyStatus = Literal['public', 'private', 'unlisted']
 
 class Youtube:
     def __init__(self):
-        self.TOKEN_FILE = 'token.pickle'
-        self.CLIENT_SECRET_FILE = 'client_secrets.json'
+        base_dir = os.getcwd()
+        self.TOKEN_FILE = os.path.join(base_dir, 'token.pickle')
+        self.CLIENT_SECRET_FILE = os.path.join(base_dir, 'client_secrets.json')
         self.API_NAME = 'youtube'
         self.API_VERSION = 'v3'
         self.SCOPES = ['https://www.googleapis.com/auth/youtube.upload',
