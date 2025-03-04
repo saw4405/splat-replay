@@ -27,11 +27,15 @@ class RecordStatus(Enum):
 
 
 class Recorder(GracefulThread):
-    def __init__(self):
+    def __init__(self, path: Optional[str] = None):
         super().__init__()
 
+        # 通常は録画モードで、ファイルが指定されている場合はファイルモード(デバッグ)とする
+        self.is_recording_mode = path is None
+        logger.info("録画モード" if self.is_recording_mode else "ファイルモード")
+
         self._obs = self._initialize_obs()
-        self._capture = self._initialize_capture()
+        self._capture = self._initialize_capture(path)
         self._analyzer = Analyzer()
         self._transcriber = self._initialize_transcriber()
 
@@ -39,7 +43,7 @@ class Recorder(GracefulThread):
         self._battle_result: Optional[str] = None
         self._rank: Dict[str, RateBase] = {}
         self._record_start_time = time.time()
-        self._last_power_check_time = time.time()
+        self._last_power_check_time = 0
         self._screen_off_count = 0
         self._should_resume_recording: Optional[Callable[[
             np.ndarray], bool]] = None
@@ -50,7 +54,10 @@ class Recorder(GracefulThread):
         logger.error("OBSとの接続が切れたので、Recorderを停止します")
         self.stop()
 
-    def _initialize_obs(self) -> Obs:
+    def _initialize_obs(self) -> Optional[Obs]:
+        if not self.is_recording_mode:
+            return None
+
         path = os.environ["OBS_PATH"]
         host = os.environ["OBS_WS_HOST"]
         port = int(os.environ["OBS_WS_PORT"])
@@ -62,11 +69,11 @@ class Recorder(GracefulThread):
             raise Exception("仮想カメラの起動に失敗しました")
         return obs
 
-    def _initialize_capture(self) -> Capture:
+    def _initialize_capture(self, path: Optional[str]) -> Capture:
         index = int(os.environ["CAPTURE_DEVICE_INDEX"])
         width = int(os.environ["CAPTURE_WIDTH"])
         height = int(os.environ["CAPTURE_HEIGHT"])
-        result = Capture.create(index, width, height)
+        result = Capture.create(index if not path else path, width, height)
         if result.is_err():
             raise Exception(
                 "キャプチャーの初期化に失敗しました。\nCAPTURE_DEVICE_INDEXの設定が合っているか確認してください。")
@@ -82,9 +89,16 @@ class Recorder(GracefulThread):
             return []
 
     def _initialize_transcriber(self) -> Optional[Transcriber]:
+        if not self.is_recording_mode:
+            return None
+
         mic_device = os.environ.get("MIC_DEVICE", "")
         if len(mic_device) == 0:
             logger.info("マイクデバイスが設定されていないため、音声認識機能は無効化されます")
+            return None
+
+        if Transcriber.find_microphone(mic_device) is None:
+            logger.error(f"指定されたマイクデバイス({mic_device})が見つからないため、音声認識機能は無効化されます")
             return None
 
         dictionary = self._load_glossary()
@@ -102,7 +116,9 @@ class Recorder(GracefulThread):
                 if result.is_err():
                     raise Exception(
                         "フレームの読み込みに失敗しました。\n他のアプリケーションがカメラを使用していないか確認してください。")
-                frame = result.unwrap()
+                frame, elapsed_time = result.unwrap()
+                if not self.is_recording_mode:
+                    self._capture.show(frame, 0.5)
 
                 status = self._check_switch_power_status(frame, status)
 
@@ -124,7 +140,8 @@ class Recorder(GracefulThread):
         finally:
             logger.info("Recorderのリソースを解放します")
             self._capture.release()
-            self._obs.close()
+            if self._obs:
+                self._obs.close()
 
     def _check_switch_power_status(self, frame: np.ndarray, current_status: RecordStatus) -> RecordStatus:
         # Switchの電源状態を確認する (処理負荷を下げるため10秒毎に確認する)
@@ -149,8 +166,9 @@ class Recorder(GracefulThread):
         # PCがスリープから復帰したとき、キャプチャボードの接続が切れているので、再接続する
         if self._analyzer.virtual_camera_off(frame):
             logger.info("仮想カメラがOFFされました")
-            if self._obs.start_virtual_cam().is_err():
+            if self._obs and self._obs.start_virtual_cam().is_err():
                 logger.warning("仮想カメラの再起動に失敗しました")
+                self.stop()
             return RecordStatus.OFF
 
         # 電源OFF→ON
@@ -164,24 +182,21 @@ class Recorder(GracefulThread):
     def _handle_wait_status(self, frame: np.ndarray) -> RecordStatus:
 
         if self._matching_start_time is None:
-            # XPが表示されたら記録しとく (XPはマッチング開始前に表示される)
-            if result := self._analyzer.x_power(frame):
-                rule, xp = result
-                if self._rank.get(rule, XP(0.0)) != xp:
-                    logger.info(f"{rule}のXパワー: {xp}")
-                    self._rank[rule] = xp
-
-            if udemae := self._analyzer.udemae(frame):
-                if self._rank.get("ウデマエ") != udemae:
-                    logger.info(f"ウデマエ: {udemae}")
-                    self._rank["ウデマエ"] = udemae
+            # マッチ選択時のランク(XP/ウデマエ)を記録する
+            if (rank := self._analyzer.rank(frame)) is not None:
+                name, value = rank
+                if self._rank.get(name) != value:
+                    logger.info(f"{name}: {value}")
+                    self._rank[name] = value
 
             # 動画のスケジュール分けを正確にできるよう、マッチング開始時の日時を記録しておく
             if self._analyzer.matching_start(frame):
                 self._matching_start_time = datetime.datetime.now()
                 logger.info("マッチング開始を検知しました")
 
-            return RecordStatus.WAIT
+            # ファイルモードの場合、マッチング中が録画されていない場合があるため、マッチング開始していなくてもバトル開始を監視する
+            if self.is_recording_mode:
+                return RecordStatus.WAIT
 
         # 処理負荷を低減するため、マッチング開始を検知した後にバトル開始を監視する
         if self._analyzer.battle_start(frame):
@@ -245,7 +260,8 @@ class Recorder(GracefulThread):
 
     def _start_record(self):
         logger.info("録画を開始します")
-        self._obs.start_record()
+        if self._obs:
+            self._obs.start_record()
         if self._transcriber:
             logger.info("字幕起こしを開始します")
             self._transcriber.start()
@@ -254,31 +270,31 @@ class Recorder(GracefulThread):
 
     def _pause_record(self):
         logger.info("録画を一時停止します")
-        self._obs.pause_record()
+        if self._obs:
+            self._obs.pause_record()
 
     def _resume_record(self):
         logger.info("録画を再開します")
-        self._obs.resume_record()
+        if self._obs:
+            self._obs.resume_record()
 
     def _cancel_record(self):
         logger.info("録画を中止します")
-        path = self._obs.stop_record().unwrap()
+
         if self._transcriber:
             logger.info("字幕起こしを停止します")
             self._transcriber.stop()
 
-        self._matching_start_time = None
+        if self._obs:
+            path = self._obs.stop_record().unwrap()
+            if os_utility.remove_file(path).is_err():
+                logger.warning(f"中断された録画ファイルの削除に失敗しました")
 
-        if os_utility.remove_file(path).is_err():
-            logger.warning(f"中断された録画ファイルの削除に失敗しました")
+        self._matching_start_time = None
 
     def _stop_record(self, frame: np.ndarray):
         logger.info("録画を停止します")
-        result = self._obs.stop_record()
-        if result.is_err():
-            logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
-            return
-        path = result.unwrap()
+
         srt = None
         if self._transcriber:
             logger.info("字幕起こしを停止します")
@@ -286,6 +302,7 @@ class Recorder(GracefulThread):
             srt = self._transcriber.get_srt()
 
         # マッチ・ルールを分析する
+        battle_result = self._battle_result or ""
         match = self._analyzer.match_name(frame) or ""
         logger.info(f"マッチ: {match}")
         rule = self._analyzer.rule_name(frame) or ""
@@ -296,13 +313,21 @@ class Recorder(GracefulThread):
         rank_key = rule if match == "Xマッチ" else "ウデマエ"
         rank = self._rank.get(rank_key, None)
 
+        if not self._obs:
+            return
+
+        result = self._obs.stop_record()
+        if result.is_err():
+            logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
+            return
+        path = result.unwrap()
+
         # アップロードキューに追加
         start_datetime = self._matching_start_time or \
             Obs.extract_start_datetime(path) or \
             datetime.datetime.now()
-        result = self._battle_result or ""
         Uploader.queue(path, start_datetime, match, rule,
-                       stage, result, rank, frame, srt)
+                       stage, battle_result, rank, frame, srt)
         logger.info("アップロードキューに追加しました")
 
         self._matching_start_time = None
