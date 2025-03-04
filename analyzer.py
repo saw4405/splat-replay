@@ -1,5 +1,4 @@
 import os
-import hashlib
 from typing import Optional, Dict, Tuple, Union
 from dataclasses import dataclass
 import logging
@@ -7,7 +6,7 @@ import logging
 import cv2
 import numpy as np
 
-from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, RGBMatcher
+from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, RGBMatcher, UniformColorMatcher
 from wrapper.ocr import OCR
 from rate import XP, Udemae
 
@@ -46,6 +45,8 @@ class Analyzer:
             return {name: TemplateMatcher(get_full_path(filename)) if isinstance(filename, str) else TemplateMatcher(get_full_path(filename[0]), get_full_path(filename[1])) for name, filename in filenames.items()}
 
         self._matching_matcher = TemplateMatcher(get_full_path("matching.png"))
+        self._matching_mask_matcher = HSVMatcher(
+            (0, 0, 200), (179, 20, 255), get_full_path("matching_mask.png"))
         self._wait_matcher = TemplateMatcher(get_full_path("wait.png"))
         self._start_matcher = TemplateMatcher(get_full_path("start.png"))
         self._stop_matcher = TemplateMatcher(
@@ -56,8 +57,9 @@ class Analyzer:
             (0, 0, 200), (179, 20, 255), get_full_path("stop_icon_mask.png"))
         self._stop_gear_matcher = HSVMatcher(
             (0, 0, 0), (179, 255, 50), get_full_path("stop_gear_mask.png"))
-        self._stop_background_mask = RGBMatcher(
+        self._stop_background_matcher = RGBMatcher(
             (28, 28, 28), get_full_path("stop_background_mask.png"))
+        self._abort_background_matcher = RGBMatcher((28, 28, 28))
         self._abort_matcher = TemplateMatcher(get_full_path("abort.png"))
         self._result_matchers = create_template_matchers({
             "WIN": "win.png",
@@ -142,24 +144,39 @@ class Analyzer:
         return self.black_screen(top_image) and not self.black_screen(bottom_image)
 
     def matching_start(self, image: np.ndarray) -> bool:
+        # TemplateMatcherは遅いため、先にHSVMatcherで検出する
+        if not self._matching_mask_matcher.match(image):
+            return False
         return self._matching_matcher.match(image)
 
     def wait(self, image: np.ndarray) -> bool:
         return self._wait_matcher.match(image)
 
     def battle_start(self, image: np.ndarray) -> bool:
+        cropped_image = image[360:380, 900:1040]
+        if not self.black_screen(cropped_image):
+            return False
         return self._start_matcher.match(image)
 
     def battle_finish(self, image: np.ndarray) -> bool:
+        cropped_image = image[400:440, 810:840]
+        matcher = UniformColorMatcher()
+        if not matcher.match(cropped_image) or self.black_screen(cropped_image):
+            return False
+
         # 全体が黒いときに誤判定しないよう、Finishの帯が黒色でないことも確認する
-        return self._finish_text_matcher.match(image) & self._finish_band_matcher.match(image)
+        return self._finish_text_matcher.match(image) and self._finish_band_matcher.match(image)
 
     def battle_stop(self, image: np.ndarray) -> bool:
         # リザルト画面をサムネイルのベースに使用するため、厳密に判定する
         # 「ゲットした表彰」という文字がある。キャラクターアイコンが表示されている。ギア名が表示されている。ローディング画面が表示されていない。
-        return self._stop_message_matcher.match(image) and not self._stop_icon_matcher.match(image) and not self._stop_gear_matcher.match(image) and self._stop_background_mask.match(image)
+        return self._stop_message_matcher.match(image) and not self._stop_icon_matcher.match(image) and not self._stop_gear_matcher.match(image) and self._stop_background_matcher.match(image)
 
     def battle_abort(self, image: np.ndarray) -> bool:
+        background_image = image[220:300, 800:1100]
+        if not self._abort_background_matcher.match(background_image):
+            return False
+
         return self._abort_matcher.match(image)
 
     def _find(self, image: np.ndarray, matchers: Dict[str, TemplateMatcher]) -> Optional[str]:
@@ -169,6 +186,9 @@ class Analyzer:
         return None
 
     def battle_result(self, image: np.ndarray) -> Optional[str]:
+        top_left_image = image[0:40, 0:230]
+        if not self.black_screen(top_left_image) or self.loading(image):
+            return None
         return self._find(image, self._result_matchers)
 
     def battle_result_latter_half(self, image: np.ndarray) -> bool:
@@ -191,6 +211,19 @@ class Analyzer:
         rows, cols = image.shape[:2]
         M = cv2.getRotationMatrix2D((cols/2, rows/2), angle, 1)
         return cv2.warpAffine(image, M, (cols, rows))
+
+    def rank(self, image: np.ndarray) -> Optional[Tuple[str, Union[XP, Udemae]]]:
+        cropped_image = image[390:410, 280:300]
+        # cropped_image_fes = image[450:470, 280:300]
+        matcher = UniformColorMatcher()
+        if not matcher.match(cropped_image):
+            return None
+
+        if (xp := self.x_power(image)) is not None:
+            return xp
+        if (udemae := self.udemae(image)) is not None:
+            return ("ウデマエ", udemae)
+        return None
 
     def udemae(self, image: np.ndarray) -> Optional[Udemae]:
         if not self._select_bankara_match_matcher.match(image):
