@@ -18,42 +18,39 @@ class BaseMatcher(ABC):
         pass
 
 
-class TemplateMatcher(BaseMatcher):
-    def __init__(self, template_path: str, mask_path: Optional[str] = None, threshold: float = 0.9):
-        """
-        テンプレートマッチングを行うクラス。
+class HashMatcher(BaseMatcher):
+    """ ハッシュ値を使用して画像の一致を検出するクラス (約0.004秒) """
 
-        :param template_path: 照合に使用するテンプレート画像のパス。
-        :param mask_path: マスク画像のパス（オプション）。
-        :param threshold: 一致とみなすスコアの閾値（0.0〜1.0）。
+    def __init__(self, image_path: str):
         """
-        super().__init__(mask_path)
-        template = cv2.imread(template_path)
-        if template is None:
-            raise ValueError(f"Failed to load template image: {template_path}")
-        self._template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-        self._threshold = threshold
-        self.height, self.width = self._template.shape[:2]
+        ハッシュ値を使用して画像の一致を検出するクラス。
+
+        :param image_path: 照合に使用する画像のパス。
+        """
+        self._hash_value = self._compute_hash(cv2.imread(image_path))
+
+    def _compute_hash(self, image: np.ndarray) -> str:
+        """
+        画像のハッシュ値を計算する。
+
+        :param image: ハッシュ値を計算する対象の画像。
+        :return: 画像のハッシュ値。
+        """
+        return hashlib.sha1(image).hexdigest()
 
     def match(self, image: np.ndarray) -> bool:
         """
-        フレーム内でテンプレートを探し、一致したかどうかを返す。
+        画像のハッシュ値を比較して一致を検出する。
 
         :param image: 検索対象のイメージ。
         :return: 一致したかどうか。
-        :return: (一致フラグ, 一致した位置) のタプル。位置は (x, y) の座標。
         """
-        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        result = cv2.matchTemplate(
-            gray_image, self._template, cv2.TM_CCOEFF_NORMED, mask=self._mask)
-        _, max_val, _, _ = cv2.minMaxLoc(result)
-
-        return max_val >= self._threshold
+        image_hash = self._compute_hash(image)
+        return image_hash == self._hash_value
 
 
 class HSVMatcher(BaseMatcher):
-    # def __init__(self, lower_bound: np.ndarray, upper_bound: np.ndarray, mask_path: Optional[str] = None, threshold: float = 0.9):
+    """ HSV色空間での色の一致を検出するクラス (約0.013秒) """
 
     def __init__(self, lower_bound: Tuple[int, int, int], upper_bound: Tuple[int, int, int], mask_path: str, threshold: float = 0.9):
         """
@@ -91,7 +88,45 @@ class HSVMatcher(BaseMatcher):
         return color_ratio >= self._threshold
 
 
+class UniformColorMatcher(BaseMatcher):
+    """ 画像全体が同系色かどうかを判定するクラス (約0.013秒) """
+
+    def __init__(self, mask_path: Optional[str] = None, hue_threshold: float = 10.0):
+        """
+        画像全体が同系色かどうかを判定するクラス。
+
+        :param mask_path: マスク画像のパス（オプション）。マスクが指定された場合、その領域のみで判定する。
+        :param hue_threshold: 同系色とみなすための色相の標準偏差の閾値（デフォルト: 10.0）。
+                              OpenCVのHSV表色系では色相は0〜179の値になる。
+        """
+        super().__init__(mask_path)
+        self._hue_threshold = hue_threshold
+
+    def match(self, image: np.ndarray) -> bool:
+        """
+        画像全体が同系色（色相のばらつきが小さい）かどうかを判定する。
+
+        :param image: 検索対象のイメージ。
+        :return: 同系色の場合True、そうでない場合False。
+        """
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        hue_channel = hsv_image[:, :, 0]
+        if self._mask is not None:
+            # マスクがある場合は、マスク領域の色相のみを評価
+            hue_values = hue_channel[self._mask == 255]
+        else:
+            hue_values = hue_channel.flatten()
+
+        if hue_values.size == 0:
+            return False
+
+        std_hue = np.std(hue_values.astype(np.float32))
+        return bool(std_hue <= self._hue_threshold)
+
+
 class RGBMatcher(BaseMatcher):
+    """ RGB色空間での色の一致を検出するクラス (約0.05秒) """
+
     def __init__(self, rgb: Tuple[int, int, int], mask_path: Optional[str] = None, threshold: float = 0.9):
         """
         RGB色空間での色の一致を検出するクラス。
@@ -129,30 +164,37 @@ class RGBMatcher(BaseMatcher):
         return match_ratio >= self._threshold
 
 
-class HashMatcher(BaseMatcher):
-    def __init__(self, image_path: str):
-        """
-        ハッシュ値を使用して画像の一致を検出するクラス。
+class TemplateMatcher(BaseMatcher):
+    """ テンプレートマッチングを行うクラス (約0.07秒) """
 
-        :param image_path: 照合に使用する画像のパス。
+    def __init__(self, template_path: str, mask_path: Optional[str] = None, threshold: float = 0.9):
         """
-        self._hash_value = self._compute_hash(cv2.imread(image_path))
+        テンプレートマッチングを行うクラス。
 
-    def _compute_hash(self, image: np.ndarray) -> str:
+        :param template_path: 照合に使用するテンプレート画像のパス。
+        :param mask_path: マスク画像のパス（オプション）。
+        :param threshold: 一致とみなすスコアの閾値（0.0〜1.0）。
         """
-        画像のハッシュ値を計算する。
-
-        :param image: ハッシュ値を計算する対象の画像。
-        :return: 画像のハッシュ値。
-        """
-        return hashlib.sha1(image).hexdigest()
+        super().__init__(mask_path)
+        template = cv2.imread(template_path)
+        if template is None:
+            raise ValueError(f"Failed to load template image: {template_path}")
+        self._template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+        self._threshold = threshold
+        self.height, self.width = self._template.shape[:2]
 
     def match(self, image: np.ndarray) -> bool:
         """
-        画像のハッシュ値を比較して一致を検出する。
+        フレーム内でテンプレートを探し、一致したかどうかを返す。
 
         :param image: 検索対象のイメージ。
         :return: 一致したかどうか。
+        :return: (一致フラグ, 一致した位置) のタプル。位置は (x, y) の座標。
         """
-        image_hash = self._compute_hash(image)
-        return image_hash == self._hash_value
+        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        result = cv2.matchTemplate(
+            gray_image, self._template, cv2.TM_CCOEFF_NORMED, mask=self._mask)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
+
+        return max_val >= self._threshold
