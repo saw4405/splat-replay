@@ -2,7 +2,6 @@ import os
 import time
 from typing import Optional
 import logging
-from logging.handlers import TimedRotatingFileHandler
 import threading
 
 import dotenv
@@ -11,35 +10,17 @@ import win32com.client
 
 from recorder import Recorder
 from uploader import Uploader
+import logger_config
 
 
 class Main:
     def __init__(self):
         dotenv.load_dotenv()
-        self._setup_logger()
+        logger_config.setup_logger()
         self._logger = logging.getLogger(__name__)
         self._load_config()
         self._recorder: Optional[Recorder] = None
         self._uploader = Uploader()
-
-    def _setup_logger(self):
-        LOG_DIRECTORY = 'logs'
-        LOG_FILE_NAME = 'splat-replay.log'
-        os.makedirs(LOG_DIRECTORY, exist_ok=True)
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s',
-            handlers=[
-                TimedRotatingFileHandler(
-                    os.path.join(LOG_DIRECTORY, LOG_FILE_NAME),
-                    when='midnight',
-                    interval=1,
-                    backupCount=30,
-                    encoding='utf-8'
-                ),
-                logging.StreamHandler()
-            ]
-        )
 
     def _load_config(self):
         self.SLEEP_AFTER_UPLOAD = bool(os.environ["SLEEP_AFTER_UPLOAD"])
@@ -60,8 +41,7 @@ class Main:
         try:
             idx = 0
             while not self._check_capture_device(self.CAPTURE_DEVICE_NAME):
-                message = f"\rキャプチャボード({self.CAPTURE_DEVICE_NAME})の接続待ち {
-                    animation[idx % len(animation)]}"
+                message = f"\rキャプチャボード({self.CAPTURE_DEVICE_NAME})の接続待ち {animation[idx % len(animation)]}"
                 print(message, end="")
                 idx += 1
                 time.sleep(0.5)
