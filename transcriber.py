@@ -24,8 +24,18 @@ class Segment:
 class Transcriber:
     LISTEN_TIMEOUT: int = 1
 
+    @staticmethod
+    def find_microphone(device_name: str) -> Optional[int]:
+        for index, name in enumerate(sr.Microphone.list_microphone_names()):
+            if device_name.lower() in name.lower():
+                return index
+        logging.error(f"指定されたデバイス名を含むマイクが見つかりません: {device_name}")
+        return None
+
     def __init__(self, device: str, language: str = "ja-JP", phrase_time_limit: float = 3, custom_dictionary: List[str] = []):
-        microphone_index = self._get_microphone_index(device)
+        microphone_index = self.find_microphone(device)
+        if microphone_index is None:
+            raise ValueError("マイクが見つかりません")
         self._microphone = sr.Microphone(device_index=microphone_index)
         self.phrase_time_limit = phrase_time_limit
         self._speech_recognizer = SpeechRecognizer(language, custom_dictionary)
@@ -37,12 +47,6 @@ class Transcriber:
         self._recording_event = threading.Event()
         self._recording_thread: Optional[threading.Thread] = None
         self._recognition_thread: Optional[threading.Thread] = None
-
-    def _get_microphone_index(self, device: str) -> int:
-        for index, name in enumerate(sr.Microphone.list_microphone_names()):
-            if device.lower() in name.lower():
-                return index
-        raise ValueError(f"指定されたデバイス名を含むマイクが見つかりません: {device}")
 
     def _listen_for_audio(self, source) -> Optional[sr.AudioData]:
         try:
