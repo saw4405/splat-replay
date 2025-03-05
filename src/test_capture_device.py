@@ -3,7 +3,7 @@ import os
 import cv2
 import dotenv
 
-from obs import Obs
+from wrapper.obs import Obs
 
 # OBSの仮想カメラのインデックスを探すために使用してください
 # OBSの仮想カメラを有効にしたときにゲーム映像が表示され、無効にしたときにゲーム映像が表示されないインデックスを環境変数に設定してください
@@ -17,7 +17,7 @@ def main():
 
     capture = cv2.VideoCapture(index)
     if not capture.isOpened():
-        raise Exception("カメラが見つかりません")
+        raise Exception("カメラが見つかりません。\nカメラのインデックスが合っているかを確認してください。")
     capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
@@ -25,7 +25,7 @@ def main():
         # フレームを読み込む
         ret, frame = capture.read()
         if not ret:
-            print("フレームの読み込みに失敗しました。")
+            print("フレームの読み込みに失敗しました。\n他のアプリケーションがカメラを使用していないか確認してください。")
             break
 
         # 映像を表示

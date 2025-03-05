@@ -189,7 +189,6 @@ pip-selfcheck.json
 
 client_secrets.json
 token.pickle
-videos
+output
 logs
 ikamodoki1.ttf
-vosk_model

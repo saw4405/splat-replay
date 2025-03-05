@@ -80,7 +80,7 @@ class Recorder(GracefulThread):
         return result.unwrap()
 
     def _load_glossary(self) -> list[str]:
-        glossary_path = os.path.join(os.path.dirname(__file__), "glossary.txt")
+        glossary_path = os.path.join(os.getcwd(), "assets", "glossary.txt")
         try:
             with open(glossary_path, encoding="utf-8") as f:
                 return [line.strip() for line in f if line.strip()]

@@ -27,7 +27,8 @@ class FFmpeg:
         """
         directory = os.path.dirname(files[0])
         extension = os.path.splitext(out_path)[1]
-        temp_path = f"temp{extension}"
+        temp_path = os.path.join(directory, f"temp{extension}")
+        os_utility.remove_file(temp_path)
 
         concat_list = "list.txt"
         concat_list_path = os.path.join(directory, concat_list)
@@ -36,7 +37,6 @@ class FFmpeg:
                 f.writelines(
                     [f"file '{os.path.basename(file)}'\n" for file in files])
 
-            os.chdir(directory)
             command = [
                 "ffmpeg",
                 "-f", "concat",
@@ -68,16 +68,16 @@ class FFmpeg:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
         extension = os.path.splitext(file)[1]
-        out_file = f"temp{extension}"
         directory = os.path.dirname(file)
-        os.chdir(directory)
+        temp_path = os.path.join(directory, f"temp{extension}")
+        os_utility.remove_file(temp_path)
         command = [
             "ffmpeg",
             "-i", file,
             "-metadata", f"title={metadata.title}",
             "-metadata", f"comment={metadata.comment}",
             "-c", "copy",
-            out_file
+            temp_path
         ]
         result = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8")
@@ -85,7 +85,7 @@ class FFmpeg:
             return Err(f"メタデータの書き込みに失敗しました: {result.stderr}")
 
         os_utility.remove_file(file)
-        os_utility.rename_file(out_file, file)
+        os_utility.rename_file(temp_path, file)
         return Ok(None)
 
     @staticmethod
@@ -131,9 +131,9 @@ class FFmpeg:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
         extension = os.path.splitext(video_path)[1]
-        out_file = f"temp{extension}"
         directory = os.path.dirname(video_path)
-        os.chdir(directory)
+        temp_path = os.path.join(directory, f"temp{extension}")
+        os_utility.remove_file(temp_path)
         command = [
             "ffmpeg",
             "-i", video_path,
@@ -141,7 +141,7 @@ class FFmpeg:
             "-map", "0",
             "-map", "1",
             "-c", "copy",
-            out_file
+            temp_path
         ]
         result = subprocess.run(
             command, input=thumbnail_data, capture_output=True)
@@ -149,7 +149,7 @@ class FFmpeg:
             return Err("サムネイルの設定に失敗しました")
 
         os_utility.remove_file(video_path)
-        os_utility.rename_file(out_file, video_path)
+        os_utility.rename_file(temp_path, video_path)
         return Ok(None)
 
     @staticmethod
@@ -168,9 +168,6 @@ class FFmpeg:
         if len(indices := result.unwrap()) == 0:
             return Err("サムネイルが見つかりませんでした")
         index = indices[0]
-
-        directory = os.path.dirname(video_path)
-        os.chdir(directory)
         command = [
             "ffmpeg",
             "-i", video_path,
@@ -196,12 +193,10 @@ class FFmpeg:
         Returns:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージが格納される
         """
-        extension = os.path.splitext(video_path)[1]
-        out_file = f"temp{extension}"
-        os_utility.remove_file(out_file)
-
         directory = os.path.dirname(video_path)
-        os.chdir(directory)
+        extension = os.path.splitext(video_path)[1]
+        temp_path = os.path.join(directory, f"temp{extension}")
+        os_utility.remove_file(temp_path)
         command = [
             "ffmpeg",
             "-i", video_path,
@@ -212,7 +207,7 @@ class FFmpeg:
             "-c", "copy",
             "-c:s", "srt",
             "-metadata:s:s:0", "title=Subtitles",
-            out_file
+            temp_path
         ]
         result = subprocess.run(
             command, input=srt, capture_output=True, text=True, encoding="utf-8")
@@ -220,7 +215,7 @@ class FFmpeg:
             return Err("字幕の設定に失敗しました")
 
         os_utility.remove_file(video_path)
-        if os_utility.rename_file(out_file, video_path).is_err():
+        if os_utility.rename_file(temp_path, video_path).is_err():
             return Err("字幕付き動画ファイルの更新に失敗しました")
 
         return Ok(None)
@@ -269,16 +264,16 @@ class FFmpeg:
             Result[None, str]: 成功した場合はOk、失敗した場合はErrにエラーメッセージを格納
         """
         extension = os.path.splitext(video_path)[1]
-        out_file = f"temp{extension}"
         directory = os.path.dirname(video_path)
-        os.chdir(directory)
+        temp_path = os.path.join(directory, f"temp{extension}")
+        os_utility.remove_file(temp_path)
         command = [
             "ffmpeg",
             "-i", video_path,
             "-map", "0",
             "-c:v", "copy",
             "-af", f"volume={volume}",
-            out_file
+            temp_path
         ]
         result = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8")
@@ -286,7 +281,7 @@ class FFmpeg:
             return Err(f"ボリューム変更に失敗しました: {result.stderr}")
 
         os_utility.remove_file(video_path)
-        os_utility.rename_file(out_file, video_path)
+        os_utility.rename_file(temp_path, video_path)
         return Ok(None)
 
     @staticmethod

@@ -38,7 +38,7 @@ class Analyzer:
 
     def _init_matchers(self):
         def get_full_path(filename: str) -> str:
-            directory = os.path.join(os.path.dirname(__file__), "templates")
+            directory = os.path.join(os.getcwd(), "assets", "templates")
             return os.path.join(directory, filename)
 
         def create_template_matchers(filenames: Dict[str, Union[str, Tuple[str, str]]]) -> Dict[str, TemplateMatcher]:

@@ -80,8 +80,7 @@ class Obs:
         if self._is_running():
             return None
 
-        os.chdir(self.directory)
-        process = subprocess.Popen(self.file)
+        process = subprocess.Popen(self.file, cwd=self.directory, shell=True)
 
         # 起動直後はWebSocket接続に失敗するので起動待ちする
         while not self._is_running():
