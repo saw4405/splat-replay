@@ -30,10 +30,9 @@ class FFmpeg:
         temp_path = os.path.join(directory, f"temp{extension}")
         os_utility.remove_file(temp_path)
 
-        concat_list = "list.txt"
-        concat_list_path = os.path.join(directory, concat_list)
+        concat_list = os.path.join(directory, "list.txt")
         try:
-            with open(concat_list_path, "w", encoding="utf-8") as f:
+            with open(concat_list, "w", encoding="utf-8") as f:
                 f.writelines(
                     [f"file '{os.path.basename(file)}'\n" for file in files])
 
@@ -54,7 +53,7 @@ class FFmpeg:
             return Ok(None)
 
         finally:
-            os_utility.remove_file(concat_list_path)
+            os_utility.remove_file(concat_list)
 
     @staticmethod
     def write_metadata(file: str, metadata: Metadata) -> Result[None, str]:
