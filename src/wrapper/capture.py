@@ -45,7 +45,7 @@ class Capture:
 
         frame_count = self._capture.get(cv2.CAP_PROP_POS_FRAMES)
         fps = self._capture.get(cv2.CAP_PROP_FPS)
-        elapsed_time = frame_count / fps
+        elapsed_time = frame_count / fps if fps != 0 else 0
         return Ok((frame, elapsed_time))
 
     def show(self, frame: np.ndarray, resize_ratio: float = 1.0):
