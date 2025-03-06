@@ -272,6 +272,7 @@ class FFmpeg:
             "-map", "0",
             "-c:v", "copy",
             "-af", f"volume={volume}",
+            "-c:s", "copy",
             temp_path
         ]
         result = subprocess.run(
