@@ -38,17 +38,17 @@
   * 必要に応じてOBSの録画設定をしておくこと [[参考]](https://obsproject.com/kb/standard-recording-output-guide)
 * Pythonをインストールしていること
 * uvをインストールしていること [[参考]](https://docs.astral.sh/uv/getting-started/installation/#installation-methods)
-* YouTubeの認証情報を取得し、YouTubeAPIを有効化しておくこと [[参照]](https://qiita.com/ny7760/items/5a728fd9e7b40588237c)
-  * 認証情報をjsonファイルとしてダウンロードしておく
+* YouTubeの認証情報を取得し、YouTube APIを有効化しておくこと [[参照]](https://qiita.com/ny7760/items/5a728fd9e7b40588237c)
+  * 認証情報をjsonファイルとしてダウンロードする
   * 15分以上の動画をアップロードできるよう、YouTubeアカウントの確認を実施しておく [[参照]](https://www.howtonote.jp/youtube/movie/index4.html#google_vignette)
 * FFmpegをインストールしていること [[参照]](https://taziku.co.jp/blog/windows-ffmpeg)
-  * パスを通しておくこと
+  * パスを通しておく
 * Tesseractをインストールしていること [[参照]](https://qiita.com/ku_a_i/items/93fdbd75edacb34ec610)
-  * best版の`eng.traineddata`をダウンロードしておくこと
-* イカモドキフォントを`thumbnail_assets`フォルダにダウンロードしておくこと [[参照](https://web.archive.org/web/20150906013956/http://aramugi.com/?page_id=807)
-  * Project Paintballフォントは二次配布が許可されていたが、イカモドキフォントは二次配布が禁止されているため、各自でダウンロードしてください
+  * best版の`eng.traineddata`をダウンロードし、Tesseractインストール先(`C:\Program Files\Tesseract-OCR`)の`tessdata`フォルダに保存する
+* イカモドキフォントをダウンロードしておくこと [[参照]](https://web.archive.org/web/20150906013956/http://aramugi.com/?page_id=807)
+  * イカモドキフォントは二次配布が禁止されているため (Project Paintballフォントは二次配布が許可されているため、本プロジェクトに同梱)
   * サムネイル画像を自動生成するためにフォントファイルを使用している
-* GroqのAPIキーを取得しておくこと [[参照]]([無料で使えるLLM API Groqを使ってみた](https://zenn.dev/mizunny/articles/58be26d25f9589))
+* GroqのAPIキーを取得しておくこと [[参照]](https://zenn.dev/mizunny/articles/58be26d25f9589)
 
 ### 初回手順
 
@@ -60,43 +60,44 @@
 
 2. YouTubeの認証情報を`client_secrets.json`として保存する
 
-3. 仮想環境を作成してアクティベートする
+3. イカモドキフォントを`assets\thumbnail`フォルダに保存する
+
+4. 仮想環境を作成してアクティベートする
 
     ```bash
     uv venv
     .venv\Scripts\activate
     ```
 
-4. パッケージをインストールする
+5. パッケージをインストールする
 
     ```bash
     uv sync
     ```
 
-    * `opencv-python`
-        * バトルの開始・終了等を検知するために使用
-    * `obs-websocket-py`
-        * OBSで録画等をするために使用 (OpenCVでは音声を含む動画を録画できないためOBSを使用)
-    * `psutil`
-        * OBSの起動有無を確認するために使用
-    * `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`
-        * YouTubeに動画をアップロードするために使用
-    * `python-dotenv`
-        * `.env`ファイルから環境変数を読み込むために使用
-    * `schedule`
-        * 動画のアップロードを定期的にバッチ処理するために使用
-    * `pytesseract`
-        * XPの読み込み等でOCRを使うために使用
-    * `pywin32`
-        * キャプチャボードの接続確認のために使用
-    * `pyaudio`
-        * マイク入力を取得するために使用
-    * `speechrecognition`
-        * 音声を文字起こしするために使用
-    * `groq`
-        * 音声を文字起こしするためと、音声認識の補正をするために使用
+    * `opencv-python`：バトルの開始・終了等を検知するために使用
+    * `obs-websocket-py`：OBSで録画等をするために使用 (OpenCVでは音声を含む動画を録画できないためOBSを使用)
+    * `psutil`：OBSの起動有無を確認するために使用
+    * `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`：YouTubeに動画をアップロードするために使用
+    * `python-dotenv`：`.env`ファイルから環境変数を読み込むために使用
+    * `schedule`：動画のアップロードを定期的にバッチ処理するために使用
+    * `pytesseract`：XPの読み込み等でOCRを使うために使用
+    * `pywin32`：キャプチャボードの接続確認のために使用
+    * `pyaudio`：マイク入力を取得するために使用
+    * `speechrecognition`：音声を文字起こしするために使用
+    * `groq`：音声を文字起こしするためと、音声認識の補正をするために使用
 
-5. `.example.env`を`.env`にリネームし、OBSのWebSocketのパスワード等を設定する
+6. `.example.env`を`.env`にリネームする
+
+7. `.env`の環境変数を設定する
+    特に設定が必要な環境変数は以下
+
+    - `CAPTURE_DEVICE_INDEX`：`src\test_capture_device.py`を使ってキャプチャデバイスが認識されているインデックスを設定する
+    - `CAPTURE_DEVICE_NAME`：接続しているキャプチャデバイス名を設定する (OBS等で名称を調査)
+    - `MIC_DEVICE`：文字起こしする場合、マイクデバイス名を設定する (OBS等で名称を調査)
+    - `OBS_WS_PASSWORD`：WebSocket機能を有効にしたときのパスワードを設定する
+    - `GROQ_API_KEY`：文字起こしする場合、取得したGroqのAPIキーを設定する
+
 
 ### 録画手順
 
