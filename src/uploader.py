@@ -7,16 +7,15 @@ import io
 from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
 
-import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import srt
 
 from wrapper.youtube import Youtube, PrivacyStatus
+from battle_result import BattleResult
+from models.rate import RateBase, XP, Udemae
 from wrapper.ffmpeg import FFmpeg
 from upload_file import UploadFile
 import utility.os as os_utility
-from rate import RateBase, XP, Udemae
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +40,9 @@ class Uploader:
     ]
 
     @staticmethod
-    def queue(path: str, start_datetime: datetime.datetime, match: str, rule: str, stage: str, result: str, rank: Optional[RateBase], result_image: Optional[np.ndarray], srt_str: Optional[str]):
+    def queue(path: str, battle_result: BattleResult, result_image: Optional[np.ndarray], srt_str: Optional[str]):
         # 動画を規定の場所に移動(キューに追加)
-        new_file_base_name = UploadFile.make_file_base_name(
-            start_datetime, match, rule, stage, result, rank)
+        new_file_base_name = UploadFile.make_file_base_name(battle_result)
         _, extension = os.path.splitext(os.path.basename(path))
         new_path = os.path.join(Uploader.RECORDED_DIR,
                                 new_file_base_name + extension)
@@ -95,12 +93,15 @@ class Uploader:
 
             # Xパワーの変動があったタイミングだけ説明にXパワーを記載
             if file.rate and last_rate != file.rate:
-                rate_prefix = f"{file.rate.label}: " if battle == "Xマッチ" else ""
-                description += f"{rate_prefix}{file.rate}\n"
+                description += f"{file.rate.label}: {file.rate}\n"
                 last_rate = file.rate
 
             elapsed_time_str = Uploader.format_seconds(elapsed_time)
-            line = f"{elapsed_time_str} {file.result.ljust(4)} {file.stage} \n"
+            if file.kill is not None and file.death is not None and file.special is not None:
+                kill_record = f"{file.kill}k {file.death}d {file.special}s"
+            else:
+                kill_record = ""
+            line = f"{elapsed_time_str} {file.result.ljust(4)} {kill_record.ljust(11)} {file.stage}\n"
             description += line
             elapsed_time += file.length
 
@@ -180,20 +181,6 @@ class Uploader:
             thumnail_data = self._create_thumbnail(files)
             if thumnail_data is not None:
                 FFmpeg.set_thumbnail(path, thumnail_data)
-
-            # 字幕を結合して動画に埋め込む
-            combined_subtitles: List[srt.Subtitle] = []
-            offset = datetime.timedelta(seconds=0)
-            for file in files:
-                subtitles = file.srt
-                if subtitles:
-                    for subtitle in subtitles:
-                        subtitle.start += offset
-                        subtitle.end += offset
-                    combined_subtitles.extend(subtitles)
-                offset += datetime.timedelta(seconds=file.length)
-            combined_srt: str = srt.compose(combined_subtitles)
-            FFmpeg.set_subtitle(path, combined_srt)
 
             if any(os_utility.remove_file(file.path).is_err() for file in files):
                 logger.warning(

@@ -6,9 +6,9 @@ import logging
 import cv2
 import numpy as np
 
-from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, RGBMatcher, UniformColorMatcher
+from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, UniformColorMatcher
 from wrapper.ocr import OCR
-from rate import XP, Udemae
+from models.rate import XP, RateBase, Udemae
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +57,9 @@ class Analyzer:
             (0, 0, 200), (179, 20, 255), get_full_path("stop_icon_mask.png"))
         self._stop_gear_matcher = HSVMatcher(
             (0, 0, 0), (179, 255, 50), get_full_path("stop_gear_mask.png"))
-        self._stop_background_matcher = RGBMatcher(
-            (28, 28, 28), get_full_path("stop_background_mask.png"))
-        self._abort_background_matcher = RGBMatcher((28, 28, 28))
+        self._stop_background_matcher = HSVMatcher(
+            (0, 0, 25), (0, 0, 35), get_full_path("stop_background_mask.png"))
+        self._abort_background_matcher = HSVMatcher((0, 0, 25), (0, 0, 35))
         self._abort_matcher = TemplateMatcher(get_full_path("abort.png"))
         self._result_matchers = create_template_matchers({
             "WIN": "win.png",
@@ -117,9 +117,9 @@ class Analyzer:
             })
         }
         self._select_xmatch_matcher = HSVMatcher(
-            (80, 255, 250), (90, 255, 255), get_full_path("select_xmatch_mask.png"))
+            (80, 230, 230), (90, 255, 255))
         self._select_bankara_match_matcher = HSVMatcher(
-            (13, 255, 250), (15, 255, 255), get_full_path("select_bankara_match_mask.png"))
+            (13, 230, 230), (15, 255, 255))
         self._udemae_matchers = create_template_matchers({
             "S+": "s_plus.png",
             "S": ("s.png", "s_mask.png"),
@@ -212,33 +212,28 @@ class Analyzer:
         M = cv2.getRotationMatrix2D((cols/2, rows/2), angle, 1)
         return cv2.warpAffine(image, M, (cols, rows))
 
-    def rank(self, image: np.ndarray) -> Optional[Tuple[str, Union[XP, Udemae]]]:
+    def rate(self, image: np.ndarray) -> Optional[RateBase]:
         cropped_image = image[390:410, 280:300]
         # cropped_image_fes = image[450:470, 280:300]
         matcher = UniformColorMatcher()
         if not matcher.match(cropped_image):
             return None
 
-        if (xp := self.x_power(image)) is not None:
-            return xp
-        if (udemae := self.udemae(image)) is not None:
-            return ("ウデマエ", udemae)
+        if self._select_xmatch_matcher.match(cropped_image):
+            if (xp := self.x_power(image)) is not None:
+                return xp[1]
+        elif self._select_bankara_match_matcher.match(cropped_image):
+            if (udemae := self.udemae(image)) is not None:
+                return udemae
         return None
 
     def udemae(self, image: np.ndarray) -> Optional[Udemae]:
-        if not self._select_bankara_match_matcher.match(image):
-            return None
-
         if (udemae := self._find(image, self._udemae_matchers)) is None:
             return None
-
         return Udemae(udemae)
 
     def x_power(self, image: np.ndarray) -> Optional[Tuple[str, XP]]:
         if self._ocr is None:
-            return None
-
-        if not self._select_xmatch_matcher.match(image):
             return None
 
         # XPは色んな画面で表示されるため、それら表示されるタイミング違いに応じて判定する
@@ -269,3 +264,55 @@ class Analyzer:
             return match_name, XP(xp)
 
         return None
+
+    def kill_record(self, image: np.ndarray) -> Optional[Tuple[int, int, int]]:
+        if self._ocr is None:
+            return None
+
+        record_positions: Dict[str, Dict[str, int]] = {
+            "kill": {
+                "x1": 1517,
+                "y1": 291,
+                "x2": 1549,
+                "y2": 317
+            },
+            "death": {
+                "x1": 1595,
+                "y1": 291,
+                "x2": 1627,
+                "y2": 317
+            },
+            "special": {
+                "x1": 1672,
+                "y1": 291,
+                "x2": 1704,
+                "y2": 317
+            }
+        }
+        records: Dict[str, int] = {}
+        for name, position in record_positions.items():
+            cropped_image = image[position["y1"]:position["y2"], position["x1"]:position["x2"]]
+
+            # 文字認識できるよう調整
+            cropped_image = cv2.resize(cropped_image, (0, 0), fx=3, fy=3)
+            cropped_image = cv2.copyMakeBorder(
+                cropped_image, 50, 50, 50, 50, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+            cropped_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+
+            result = self._ocr.read_text(
+                cropped_image, "SINGLE_LINE", "0123456789")
+            if result.is_err():
+                logger.warning(f"{name}数のOCRに失敗しました: {result.unwrap_err()}")
+                return None
+            count_str = result.unwrap().strip()
+            try:
+                count = int(count_str)
+                records[name] = count
+            except ValueError:
+                cv2.imwrite(
+                    fr"C:\Users\shogo\repo\splat-replay\{name}.png", cropped_image)
+                logger.warning(f"{name}数が数値ではありません: {count_str}")
+
+        if len(records) != 3:
+            return None
+        return records["kill"], records["death"], records["special"]

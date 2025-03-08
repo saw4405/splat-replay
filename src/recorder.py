@@ -12,9 +12,9 @@ from uploader import Uploader
 from wrapper.capture import Capture
 from analyzer import Analyzer
 from transcriber import Transcriber
+from battle_result import BattleResult
 from utility.graceful_thread import GracefulThread
 import utility.os as os_utility
-from rate import RateBase, XP, Udemae
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,7 @@ class Recorder(GracefulThread):
         self._analyzer = Analyzer()
         self._transcriber = self._initialize_transcriber()
 
-        self._matching_start_time: Optional[datetime.datetime] = None
-        self._battle_result: Optional[str] = None
-        self._rank: Dict[str, RateBase] = {}
+        self._battle_result = BattleResult()
         self._record_start_time = time.time()
         self._last_power_check_time = 0
         self._screen_off_count = 0
@@ -181,17 +179,17 @@ class Recorder(GracefulThread):
 
     def _handle_wait_status(self, frame: np.ndarray) -> RecordStatus:
 
-        if self._matching_start_time is None:
-            # マッチ選択時のランク(XP/ウデマエ)を記録する
-            if (rank := self._analyzer.rank(frame)) is not None:
-                name, value = rank
-                if self._rank.get(name) != value:
-                    logger.info(f"{name}: {value}")
-                    self._rank[name] = value
+        # [TODO] スケジュール変更でバトルリザルトをリセットする
+
+        if self._battle_result.start is None:
+            # マッチ選択時のレート(XP/ウデマエ)を記録する
+            if (rate := self._analyzer.rate(frame)) is not None and self._battle_result.rate != rate:
+                self._battle_result.rate = rate
+                logger.info(f"{rate.label}: {rate}")
 
             # 動画のスケジュール分けを正確にできるよう、マッチング開始時の日時を記録しておく
             if self._analyzer.matching_start(frame):
-                self._matching_start_time = datetime.datetime.now()
+                self._battle_result.start = datetime.datetime.now()
                 logger.info("マッチング開始を検知しました")
 
             # ファイルモードの場合、マッチング中が録画されていない場合があるため、マッチング開始していなくてもバトル開始を監視する
@@ -222,7 +220,7 @@ class Recorder(GracefulThread):
             return RecordStatus.WAIT
 
         # 勝敗判定
-        if self._battle_result is None:
+        if self._battle_result.result is None:
             # Finish!表示中は録画を一時停止する
             if self._analyzer.battle_finish(frame):
                 self._should_resume_recording = lambda frame: not self._analyzer.battle_result_latter_half(
@@ -230,9 +228,9 @@ class Recorder(GracefulThread):
                 self._pause_record()
                 return RecordStatus.PAUSE
 
-            self._battle_result = self._analyzer.battle_result(frame)
-            if self._battle_result:
-                logger.info(f"バトル結果: {self._battle_result}")
+            self._battle_result.result = self._analyzer.battle_result(frame)
+            if self._battle_result.result:
+                logger.info(f"バトル結果: {self._battle_result.result}")
             return RecordStatus.RECORD
 
         # ローディング中は録画を一時停止する
@@ -266,7 +264,6 @@ class Recorder(GracefulThread):
             logger.info("字幕起こしを開始します")
             self._transcriber.start()
         self._record_start_time = time.time()
-        self._battle_result = None
 
     def _pause_record(self):
         logger.info("録画を一時停止します")
@@ -280,57 +277,54 @@ class Recorder(GracefulThread):
 
     def _cancel_record(self):
         logger.info("録画を中止します")
+        try:
+            if self._transcriber:
+                logger.info("字幕起こしを停止します")
+                self._transcriber.stop()
 
-        if self._transcriber:
-            logger.info("字幕起こしを停止します")
-            self._transcriber.stop()
-
-        if self._obs:
-            result = self._obs.stop_record()
-            if result.is_err():
-                logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
-                return
-            path = result.unwrap()
-            if os_utility.remove_file(path).is_err():
-                logger.warning(f"中断された録画ファイルの削除に失敗しました")
-
-        self._matching_start_time = None
+            if self._obs:
+                result = self._obs.stop_record()
+                if result.is_err():
+                    logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
+                    return
+                path = result.unwrap()
+                if os_utility.remove_file(path).is_err():
+                    logger.warning(f"中断された録画ファイルの削除に失敗しました")
+        finally:
+            self._battle_result = BattleResult()
 
     def _stop_record(self, frame: np.ndarray):
         logger.info("録画を停止します")
+        try:
+            srt = None
+            if self._transcriber:
+                logger.info("字幕起こしを停止します")
+                self._transcriber.stop()
+                srt = self._transcriber.get_srt()
 
-        srt = None
-        if self._transcriber:
-            logger.info("字幕起こしを停止します")
-            self._transcriber.stop()
-            srt = self._transcriber.get_srt()
+            if self._obs:
+                result = self._obs.stop_record()
+                if result.is_err():
+                    logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
+                    return
+                path = result.unwrap()
 
-        if self._obs:
-            result = self._obs.stop_record()
-            if result.is_err():
-                logger.error(f"録画の停止に失敗しました: {result.unwrap_err()}")
-                return
-            path = result.unwrap()
+                # マッチ・ルールを分析する
+                if self._battle_result.start is None:
+                    self._battle_result.start = Obs.extract_start_datetime(path) or \
+                        datetime.datetime.now()
+                self._battle_result.battle = self._analyzer.match_name(frame)
+                logger.info(f"マッチ: {self._battle_result.battle}")
+                self._battle_result.rule = self._analyzer.rule_name(frame)
+                logger.info(f"ルール: {self._battle_result.rule}")
+                self._battle_result.stage = self._analyzer.stage_name(frame)
+                logger.info(f"ステージ: {self._battle_result.stage}")
+                if (kill_record := self._analyzer.kill_record(frame)) is not None:
+                    self._battle_result.kill, self._battle_result.death, self._battle_result.special = kill_record
+                logger.info(f"キルレ: {kill_record}")
 
-            # マッチ・ルールを分析する
-            battle_result = self._battle_result or ""
-            match = self._analyzer.match_name(frame) or ""
-            logger.info(f"マッチ: {match}")
-            rule = self._analyzer.rule_name(frame) or ""
-            logger.info(f"ルール: {rule}")
-            stage = self._analyzer.stage_name(frame) or ""
-            logger.info(f"ステージ: {stage}")
-
-            rank_key = rule if match == "Xマッチ" else "ウデマエ"
-            rank = self._rank.get(rank_key, None)
-
-            # アップロードキューに追加
-            start_datetime = self._matching_start_time or \
-                Obs.extract_start_datetime(path) or \
-                datetime.datetime.now()
-            Uploader.queue(path, start_datetime, match, rule,
-                           stage, battle_result, rank, frame, srt)
-            logger.info("アップロードキューに追加しました")
-
-        self._matching_start_time = None
-        self._rank = {}  # バトル後はXPが更新されている可能性があるので、いったんリセットする
+                # アップロードキューに追加
+                Uploader.queue(path, self._battle_result, frame, srt)
+                logger.info("アップロードキューに追加しました")
+        finally:
+            self._battle_result = BattleResult()

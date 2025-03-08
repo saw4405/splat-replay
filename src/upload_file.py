@@ -1,14 +1,15 @@
 import os
 import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
 import srt
 
+from battle_result import BattleResult
 from wrapper.ffmpeg import FFmpeg
-from rate import RateBase, XP, Udemae
+from models.rate import RateBase, XP, Udemae
 
 
 @dataclass
@@ -16,29 +17,63 @@ class UploadFile:
     DATETIME_FORMAT = "%Y-%m-%d %H-%M-%S"
 
     path: str
-    file_name: str
-    extension: str
-    start: datetime.datetime
-    battle: str
-    rule: str
-    stage: str
-    result: str
-    rate: Optional[RateBase]
-    length: float
+    battle_result: BattleResult
 
-    def __init__(self, path):
+    @staticmethod
+    def make_file_base_name(battle_result: BattleResult) -> str:
+        return "_".join(battle_result.to_list())
+
+    def __init__(self, path: str):
         self.path = path
-        self.file_name = os.path.basename(path)
-        file_base_name, self.extension = os.path.splitext(self.file_name)
+        file_name = os.path.basename(path)
+        file_base_name = os.path.splitext(file_name)[0]
+        metadata = file_base_name.split("_")
+        if len(metadata) != 9:
+            raise ValueError(f"Invalid file name format: {file_base_name}")
+        self.battle_result = BattleResult.from_list(metadata)
 
-        metadata = self._extract_metadata(file_base_name)
-        self.start = datetime.datetime.strptime(
-            metadata[0], self.DATETIME_FORMAT)
-        self.battle, self.rule, self.stage, self.result = metadata[1:5]
-        self.rate = RateBase.create(
-            metadata[5]) if len(metadata) == 6 else None
+    @property
+    def extension(self) -> str:
+        file_name = os.path.basename(self.path)
+        return os.path.splitext(file_name)[1]
 
-        self.length = self._get_video_length()
+    @property
+    def result(self) -> str:
+        return self.battle_result.result or ""
+
+    @property
+    def rate(self) -> Optional[RateBase]:
+        return self.battle_result.rate
+
+    @property
+    def kill(self) -> Optional[int]:
+        return self.battle_result.kill
+
+    @property
+    def death(self) -> Optional[int]:
+        return self.battle_result.death
+
+    @property
+    def special(self) -> Optional[int]:
+        return self.battle_result.special
+
+    @property
+    def stage(self) -> str:
+        return self.battle_result.stage or ""
+
+    @property
+    def start(self) -> datetime.datetime:
+        if self.battle_result.start is None:
+            raise ValueError("Invalid start time")
+        return self.battle_result.start
+
+    @property
+    def battle(self) -> str:
+        return self.battle_result.battle or ""
+
+    @property
+    def rule(self) -> str:
+        return self.battle_result.rule or ""
 
     @property
     def srt(self) -> Optional[List[srt.Subtitle]]:
@@ -47,7 +82,8 @@ class UploadFile:
             return None
         return list(srt.parse(srt_str.unwrap()))
 
-    def _get_video_length(self) -> float:
+    @property
+    def length(self) -> float:
         video = None
         try:
             video = cv2.VideoCapture(self.path)
@@ -59,22 +95,6 @@ class UploadFile:
         finally:
             if video:
                 video.release()
-
-    def _extract_metadata(self, file_base_name: str) -> List[str]:
-        metadata = file_base_name.split("_")
-        if len(metadata) not in (5, 6):
-            raise ValueError(f"Invalid file name format: {file_base_name}")
-        return metadata
-
-    @staticmethod
-    def make_file_base_name(start: datetime.datetime, match: str, rule: str, stage: str, result: str, rate: Optional[RateBase] = None) -> str:
-        # スケジュール毎に結合できるよう、録画開始日時(バトル開始日時)、マッチ、ルールをファイル名に含める
-        # 動画説明に各試合の結果を記載するため、結果もファイル名に含める
-        start_str = start.strftime(UploadFile.DATETIME_FORMAT)
-        file_base_name = f"{start_str}_{match}_{rule}_{stage}_{result}"
-        if rate:
-            file_base_name += f"_{rate}"
-        return file_base_name
 
     def set_thumbnail(self, thumbnail: np.ndarray) -> None:
         ret, buffer = cv2.imencode('.png', thumbnail)

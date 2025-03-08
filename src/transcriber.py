@@ -91,7 +91,6 @@ class Transcriber:
             audio, start, end = self._audio_queue.get(timeout=1)
             result = self._speech_recognizer.recognize(audio)
             if result.is_err():
-                logging.error(result.unwrap_err())
                 continue
 
             self._segments.append(Segment(start, end, result.unwrap()))

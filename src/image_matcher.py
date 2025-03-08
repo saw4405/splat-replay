@@ -52,7 +52,7 @@ class HashMatcher(BaseMatcher):
 class HSVMatcher(BaseMatcher):
     """ HSV色空間での色の一致を検出するクラス (約0.013秒) """
 
-    def __init__(self, lower_bound: Tuple[int, int, int], upper_bound: Tuple[int, int, int], mask_path: str, threshold: float = 0.9):
+    def __init__(self, lower_bound: Tuple[int, int, int], upper_bound: Tuple[int, int, int], mask_path: Optional[str] = None, threshold: float = 0.9):
         """
         HSV色空間での色の一致を検出するクラス。
 
@@ -73,18 +73,22 @@ class HSVMatcher(BaseMatcher):
         :param image: 検索対象のイメージ。
         :return: 一致したかどうか。
         """
-        assert self._mask is not None, "Mask image is required for HSVMatcher."
-        masked_image = cv2.bitwise_and(image, image, mask=self._mask)
+        if self._mask is not None:
+            masked_image = cv2.bitwise_and(image, image, mask=self._mask)
+        else:
+            masked_image = image
         hsv_image = cv2.cvtColor(masked_image, cv2.COLOR_BGR2HSV)
         color_mask = cv2.inRange(
             hsv_image, self._lower_bound, self._upper_bound)
-        combined_mask = cv2.bitwise_and(
-            color_mask, color_mask, mask=self._mask)
-
-        total_mask_pixels = cv2.countNonZero(self._mask)
-        color_pixel_count = cv2.countNonZero(combined_mask)
+        if self._mask is not None:
+            combined_mask = cv2.bitwise_and(
+                color_mask, color_mask, mask=self._mask)
+            total_mask_pixels = cv2.countNonZero(self._mask)
+            color_pixel_count = cv2.countNonZero(combined_mask)
+        else:
+            total_mask_pixels = image.shape[0] * image.shape[1]
+            color_pixel_count = cv2.countNonZero(color_mask)
         color_ratio = color_pixel_count / total_mask_pixels if total_mask_pixels > 0 else 0
-
         return color_ratio >= self._threshold
 
 
@@ -155,9 +159,9 @@ class RGBMatcher(BaseMatcher):
             mask = np.ones(image.shape[:2], dtype=bool)
 
         match_pixels = np.all(masked_image == self._rgb, axis=-1)
-        match_count = np.sum(match_pixels)
+        match_count = int(np.sum(match_pixels))
 
-        total_masked_pixels = np.sum(mask)
+        total_masked_pixels = int(np.sum(mask))
         if total_masked_pixels == 0:
             return False
         match_ratio = match_count / total_masked_pixels
@@ -192,9 +196,13 @@ class TemplateMatcher(BaseMatcher):
         :return: (一致フラグ, 一致した位置) のタプル。位置は (x, y) の座標。
         """
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        result = cv2.matchTemplate(
-            gray_image, self._template, cv2.TM_CCOEFF_NORMED, mask=self._mask)
+        # maskがある場合とない場合で処理を分岐
+        if self._mask is not None:
+            result = cv2.matchTemplate(
+                gray_image, self._template, cv2.TM_CCOEFF_NORMED, mask=self._mask)
+        else:
+            result = cv2.matchTemplate(
+                gray_image, self._template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
 
         return max_val >= self._threshold
