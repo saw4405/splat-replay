@@ -42,7 +42,7 @@ class Recorder(GracefulThread):
         self._battle_result = BattleResult()
         self._record_start_time = time.time()
         self._last_power_check_time = 0
-        self._screen_off_count = 0
+        self._power_off_count = 0
         self._should_resume_recording: Optional[Callable[[
             np.ndarray], bool]] = None
 
@@ -147,12 +147,12 @@ class Recorder(GracefulThread):
             return current_status
         self._last_power_check_time = time.time()
 
-        if self._analyzer.black_screen(frame):
-            self._screen_off_count += 1
+        if self._analyzer.power_off(frame):
+            self._power_off_count += 1
         else:
-            self._screen_off_count = 0
+            self._power_off_count = 0
 
-        if self._screen_off_count >= 3:
+        if self._power_off_count >= 3:
             # 電源ON→OFF
             if current_status != RecordStatus.OFF:
                 logger.info("Switchが電源OFFされました")
@@ -223,6 +223,7 @@ class Recorder(GracefulThread):
         if self._battle_result.result is None:
             # Finish!表示中は録画を一時停止する
             if self._analyzer.battle_finish(frame):
+                logger.info("Finish!表示を検知したため、録画を一時停止します")
                 self._should_resume_recording = lambda frame: not self._analyzer.battle_result_latter_half(
                     frame)
                 self._pause_record()
@@ -235,6 +236,7 @@ class Recorder(GracefulThread):
 
         # ローディング中は録画を一時停止する
         if self._analyzer.loading(frame):
+            logger.info("ローディング中を検知したため、録画を一時停止します")
             self._should_resume_recording = self._analyzer.loading
             self._pause_record()
             return RecordStatus.PAUSE

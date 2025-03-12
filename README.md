@@ -98,6 +98,16 @@
     - `OBS_WS_PASSWORD`：WebSocket機能を有効にしたときのパスワードを設定する
     - `GROQ_API_KEY`：文字起こしする場合、取得したGroqのAPIキーを設定する
 
+8. SwitchをPower OFFしたとき、キャプチャボードからの入力が黒画面でない場合、その画像を取得する
+
+    1. Switch・キャプチャボード・PCを接続する
+    2. Switchを起動する
+    3. OBSを起動する
+    4. ゲーム画面が表示されたら、SwitchをPower OFFする
+    5. OBSでスクリーンショットを撮る
+    6. `assets\templates`フォルダに`power_off.png`として保存する
+
+
 
 ### 録画手順
 

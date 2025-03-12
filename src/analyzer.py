@@ -58,7 +58,7 @@ class Analyzer:
         self._stop_gear_matcher = HSVMatcher(
             (0, 0, 0), (179, 255, 50), get_full_path("stop_gear_mask.png"))
         self._stop_background_matcher = HSVMatcher(
-            (0, 0, 25), (0, 0, 35), get_full_path("stop_background_mask.png"))
+            (0, 0, 25), (179, 30, 40), get_full_path("stop_background_mask.png"))
         self._abort_background_matcher = HSVMatcher((0, 0, 25), (0, 0, 35))
         self._abort_matcher = TemplateMatcher(get_full_path("abort.png"))
         self._result_matchers = create_template_matchers({
@@ -130,12 +130,18 @@ class Analyzer:
             (0, 0, 50), (179, 255, 255), get_full_path("finish_band_mask.png"))
         self._virtual_camera_off_matcher = HashMatcher(
             get_full_path("virtual_camera_off.png"))
+        power_off_image_path = get_full_path("power_off.png")
+        self._power_off_matcher = HashMatcher(
+            power_off_image_path) if os.path.exists(power_off_image_path) else None
 
     def virtual_camera_off(self, image: np.ndarray) -> bool:
         return self._virtual_camera_off_matcher.match(image)
 
+    def power_off(self, image: np.ndarray) -> bool:
+        return self.black_screen(image) or (self._power_off_matcher.match(image) if self._power_off_matcher else False)
+
     def black_screen(self, image: np.ndarray) -> bool:
-        return image.max() <= 10
+        return image.max() <= 20
 
     def loading(self, image: np.ndarray) -> bool:
         # ロード画面は上部800pxが真っ黒
@@ -291,7 +297,8 @@ class Analyzer:
         }
         records: Dict[str, int] = {}
         for name, position in record_positions.items():
-            cropped_image = image[position["y1"]:position["y2"], position["x1"]:position["x2"]]
+            cropped_image = image[position["y1"]
+                :position["y2"], position["x1"]:position["x2"]]
 
             # 文字認識できるよう調整
             cropped_image = cv2.resize(cropped_image, (0, 0), fx=3, fy=3)
