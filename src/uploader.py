@@ -16,6 +16,7 @@ from models.rate import RateBase, XP, Udemae
 from wrapper.ffmpeg import FFmpeg
 from upload_file import UploadFile
 import utility.os as os_utility
+import logger_config
 
 logger = logging.getLogger(__name__)
 
@@ -154,15 +155,20 @@ class Uploader:
         return time_scheduled_files
 
     def _concat_videos_by_time_range(self):
+        logger.info("タイムスケジュール毎に動画を結合します")
         files = glob.glob(f'{self.RECORDED_DIR}/*.*')
         recorded_video_files = [UploadFile(path) for path in files]
         time_scheduled_files = self._split_by_time_ranges(recorded_video_files)
+
         for key, files in time_scheduled_files.items():
             day, time, battle, rule = key
+            day_str = day.strftime("%Y-%m-%d")
+            time_str = time.strftime("%H")
+            logger.info(
+                f"タイムスケジュールが{day_str} {time_str}時～の{battle} {rule}の動画を結合します")
 
             extension = files[0].extension
-            file_name = f"{day.strftime(
-                "%Y-%m-%d")}_{time.strftime("%H")}_{battle}_{rule}{extension}"
+            file_name = f"{day_str}_{time_str}_{battle}_{rule}{extension}"
             path = os.path.join(self.PENDING_DIR, file_name)
 
             # 動画を結合する
@@ -285,6 +291,13 @@ class Uploader:
         thumbnail.save(buf, format='PNG')
         return buf.getvalue()
 
+    def _change_volume(self, path: str, volume_multiplier: float):
+        if volume_multiplier == 1.0:
+            return
+
+        logger.info(f"動画の音量を{volume_multiplier}倍に変更します")
+        FFmpeg.change_volume(path, volume_multiplier)
+
     def _upload_video(self, path: str) -> Optional[str]:
         result = FFmpeg.read_metadata(path)
         if result.is_err():
@@ -309,6 +322,7 @@ class Uploader:
             logger.warning(f"サムネイルの取得に失敗しました: {result.unwrap_err()}")
             return
 
+        logger.info("サムネイルをアップロードします")
         thumbnail_data = result.unwrap()
         thumbnail_path = os.path.join(self.PENDING_DIR, f"{video_id}.png")
         try:
@@ -330,6 +344,7 @@ class Uploader:
             logger.warning(f"字幕の取得に失敗しました: {result.unwrap_err()}")
             return
 
+        logger.info("字幕をアップロードします")
         srt = result.unwrap()
         srt_path = os.path.join(self.PENDING_DIR, f"{video_id}.srt")
         try:
@@ -350,14 +365,16 @@ class Uploader:
             logger.warning("プレイリストIDが指定されていません")
             return
 
+        logger.info("プレイリストに挿入します")
         result = self._youtube.insert_to_playlist(video_id, self._playlist_id)
         if result.is_err():
             logger.warning(f"プレイリストへの挿入に失敗しました: {result.unwrap_err()}")
 
     def _upload_to_youtube(self):
+        logger.info("YouTubeに動画をアップロードします")
         files = glob.glob(f'{self.PENDING_DIR}/*.*')
         for path in files:
-            FFmpeg.change_volume(path, self.volume_multiplier)
+            self._change_volume(path, self.volume_multiplier)
 
             video_id = self._upload_video(path)
             if video_id is None:
@@ -380,5 +397,6 @@ class Uploader:
 
 # 直接Uploaderスクリプトを実行したとき、アップロードを実行する
 if __name__ == '__main__':
+    logger_config.setup_logger()
     uploader = Uploader()
     uploader.upload()
