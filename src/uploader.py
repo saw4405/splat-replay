@@ -63,8 +63,14 @@ class Uploader:
         super().__init__()
 
         self._private_status: PrivacyStatus = "private" if os.environ.get(
-            "VIDEO_PUBLIC", "false").lower() == "false" else "public"
-        self._playlist_id = os.environ.get("PLAYLIST_ID")
+            "YOUTUBE_VIDEO_PUBLIC", "false").lower() == "false" else "public"
+        self._playlist_id = os.environ.get("YOUTUBE_PLAYLIST_ID")
+        self._title_template = os.environ.get(
+            "YOUTUBE_TITLE_TEMPLATE", "{BATTLE}({RATE}) {RULE} {WIN}勝{LOSE}敗 {DAY} {SCHEDULE}時～")
+        self._description_template = os.environ.get(
+            "YOUTUBE_DESCRIPTION_TEMPLATE", "{CHAPTERS}")
+        self._chapter_template = os.environ.get(
+            "YOUTUBE_CHAPTER_TITLE_TEMPLATE", "{RESULT} {KILL}k {DEATH}d {SPECIAL}s {STAGE}")
         self.volume_multiplier = float(
             os.environ.get("VOLUME_MULTIPLIER", 1.0))
 
@@ -81,12 +87,12 @@ class Uploader:
         return f"{hours:02}:{minutes:02}:{seconds:02}"
 
     def _generate_title_and_description(self, files: List[UploadFile], day: datetime.date, time: datetime.time, battle: str, rule: str) -> Tuple[str, str]:
-        description = ""
         elapsed_time = 0
         win_count = 0
         lose_count = 0
         last_rate: Optional[RateBase] = None
 
+        chapters = ""
         for file in files:
             # タイトルに付けるため、勝敗数をカウント
             win_count += (file.result == "WIN")
@@ -94,16 +100,15 @@ class Uploader:
 
             # Xパワーの変動があったタイミングだけ説明にXパワーを記載
             if file.rate and last_rate != file.rate:
-                description += f"{file.rate.label}: {file.rate}\n"
+                chapters += f"{file.rate.label}: {file.rate}\n"
                 last_rate = file.rate
 
             elapsed_time_str = Uploader.format_seconds(elapsed_time)
-            if file.kill is not None and file.death is not None and file.special is not None:
-                kill_record = f"{file.kill}k {file.death}d {file.special}s"
-            else:
-                kill_record = ""
-            line = f"{elapsed_time_str} {file.result.ljust(4)} {kill_record.ljust(11)} {file.stage}\n"
-            description += line
+
+            chapter_title = self._chapter_template.replace("{RESULT}", file.result).replace("{KILL}", str(file.kill) if file.kill else "-").replace("{DEATH}", str(file.death) if file.death else "-").replace("{SPECIAL}", str(file.special) if file.special else "-").replace(
+                "{STAGE}", file.stage).replace("{RATE}", f"{file.rate.label}{file.rate}" if file.rate else "").replace("{BATTLE}", file.battle).replace("{RULE}", file.rule).replace("{START_TIME}", file.start.strftime("%H:%M:%S"))
+            chapter = f"{elapsed_time_str} {chapter_title}\n"
+            chapters += chapter
             elapsed_time += file.length
 
         rates = [file.rate for file in files if file.rate]
@@ -114,14 +119,19 @@ class Uploader:
             min_rate = min(rates).short_str()
             rate_prefix = rates[0].label if battle == "Xマッチ" else ""
             if min_rate == max_rate:
-                rate = f"({rate_prefix}{min_rate})"
+                rate = f"{rate_prefix}{min_rate}"
             else:
-                rate = f"({rate_prefix}{min_rate}-{max_rate})"
+                rate = f"{rate_prefix}{min_rate}-{max_rate}"
+
+        stages = ",".join(list(dict.fromkeys([file.stage for file in files])))
 
         day_str = day.strftime("'%y.%m.%d")
         time_str = time.strftime("%H").lstrip("0")
 
-        title = f"{battle}{rate} {rule} {win_count}勝{lose_count}敗 {day_str} {time_str}時～"
+        title = self._title_template.replace("{BATTLE}", battle).replace("{RULE}", rule).replace("{RATE}", rate).replace(
+            "{WIN}", str(win_count)).replace("{LOSE}", str(lose_count)).replace("{DAY}", day_str).replace("{SCHEDULE}", time_str).replace("{STAGES}", stages)
+        description = self._description_template.replace("{CHAPTERS}", chapters).replace("{BATTLE}", battle).replace("{RULE}", rule).replace("{RATE}", rate).replace(
+            "{WIN}", str(win_count)).replace("{LOSE}", str(lose_count)).replace("{DAY}", day_str).replace("{SCHEDULE}", time_str).replace("{STAGES}", stages)
         return title, description
 
     def _split_by_time_ranges(self, files: List[UploadFile]) -> Dict[Tuple[datetime.date, datetime.time, str, str], List[UploadFile]]:
