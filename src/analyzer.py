@@ -6,9 +6,9 @@ import logging
 import cv2
 import numpy as np
 
-from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, UniformColorMatcher
-from wrapper.ocr import OCR
-from models.rate import XP, RateBase, Udemae
+from .image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, UniformColorMatcher
+from .wrapper.ocr import OCR
+from .models.rate import XP, RateBase, Udemae
 
 logger = logging.getLogger(__name__)
 
@@ -277,28 +277,27 @@ class Analyzer:
 
         record_positions: Dict[str, Dict[str, int]] = {
             "kill": {
-                "x1": 1517,
-                "y1": 291,
-                "x2": 1549,
-                "y2": 317
+                "x1": 1519,
+                "y1": 293,
+                "x2": 1548,
+                "y2": 316
             },
             "death": {
-                "x1": 1595,
-                "y1": 291,
-                "x2": 1627,
-                "y2": 317
+                "x1": 1597,
+                "y1": 293,
+                "x2": 1626,
+                "y2": 316
             },
             "special": {
-                "x1": 1672,
-                "y1": 291,
-                "x2": 1704,
-                "y2": 317
+                "x1": 1674,
+                "y1": 293,
+                "x2": 1703,
+                "y2": 316
             }
         }
         records: Dict[str, int] = {}
         for name, position in record_positions.items():
-            cropped_image = image[position["y1"]
-                :position["y2"], position["x1"]:position["x2"]]
+            cropped_image = image[position["y1"]:position["y2"], position["x1"]:position["x2"]]
 
             # 文字認識できるよう調整
             cropped_image = cv2.resize(cropped_image, (0, 0), fx=3, fy=3)
@@ -316,8 +315,6 @@ class Analyzer:
                 count = int(count_str)
                 records[name] = count
             except ValueError:
-                cv2.imwrite(
-                    fr"C:\Users\shogo\repo\splat-replay\{name}.png", cropped_image)
                 logger.warning(f"{name}数が数値ではありません: {count_str}")
 
         if len(records) != 3:

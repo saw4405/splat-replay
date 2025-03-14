@@ -3,7 +3,7 @@ from typing import Optional, Literal
 import pytesseract
 import numpy as np
 
-from utility.result import Result, Ok, Err
+from ..utility.result import Result, Ok, Err
 
 # ps_modeの型を定義する
 PSMode = Literal["AUTO", "SINGLE_COLUMN", "SINGLE_LINE",
