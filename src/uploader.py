@@ -9,6 +9,7 @@ from collections import defaultdict
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+import srt
 
 from wrapper.youtube import Youtube, PrivacyStatus
 from battle_result import BattleResult
@@ -197,6 +198,20 @@ class Uploader:
             thumnail_data = self._create_thumbnail(files)
             if thumnail_data is not None:
                 FFmpeg.set_thumbnail(path, thumnail_data)
+
+            # 字幕を結合して動画に埋め込む (最初のファイルに字幕がないと、結合後のファイルに字幕が埋め込まれないため、手動で結合)
+            combined_subtitles: List[srt.Subtitle] = []
+            offset = datetime.timedelta(seconds=0)
+            for file in files:
+                subtitles = file.srt
+                if subtitles:
+                    for subtitle in subtitles:
+                        subtitle.start += offset
+                        subtitle.end += offset
+                    combined_subtitles.extend(subtitles)
+                offset += datetime.timedelta(seconds=file.length)
+            combined_srt: str = srt.compose(combined_subtitles)
+            FFmpeg.set_subtitle(path, combined_srt)
 
             if any(os_utility.remove_file(file.path).is_err() for file in files):
                 logger.warning(
