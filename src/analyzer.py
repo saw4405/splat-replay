@@ -6,9 +6,9 @@ import logging
 import cv2
 import numpy as np
 
-from .image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, UniformColorMatcher
-from .wrapper.ocr import OCR
-from .models.rate import XP, RateBase, Udemae
+from image_matcher import TemplateMatcher, HSVMatcher, HashMatcher, UniformColorMatcher
+from wrapper.ocr import OCR
+from models.rate import XP, RateBase, Udemae
 
 logger = logging.getLogger(__name__)
 
