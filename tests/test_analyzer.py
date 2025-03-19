@@ -28,7 +28,7 @@ def load_image():
     ("result_1.png", (10, 8, 3)),
     ("result_2.png", (0, 1, 0)),
     ("result_3.png", (9, 9, 2)),
-    ("result_fes.png", None),   # 現状、フェスには対応していない
+    ("result_fes.png", (4, 5, 3)),
     ("result_not_lose.png", (11, 7, 3)),
 ])
 def test_kill_record(analyzer, load_image, filename, expected):
