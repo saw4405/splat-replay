@@ -233,15 +233,31 @@ class Uploader:
                     "結合前のファイル削除に失敗したため、結合後のファイルが再度アップロードされる可能性があります")
 
     def _create_thumbnail(self, files: List[UploadFile]) -> Optional[bytes]:
-        thumbnail_data = None
+        best_thumbnail_data = None
+        best_brightness = -1
         for file in files:
             result = FFmpeg.get_thumbnail(file.path)
-            if result.is_ok():
-                thumbnail_data = result.unwrap()
-                break
-        if thumbnail_data is None:
+            if result.is_err():
+                continue
+            data = result.unwrap()
+            try:
+                image = Image.open(io.BytesIO(data)).convert("L")
+                width, height = image.size
+                cropped_image = image.crop((0, 0, min(750, width), height))
+                brightness = ImageStat.Stat(cropped_image).mean[0]
+            except Exception as e:
+                logger.warning(f"サムネイル画像の明るさ計算失敗: {e}")
+                brightness = 0
+            if brightness > best_brightness:
+                best_brightness = brightness
+                best_thumbnail_data = data
+
+        if best_thumbnail_data is None:
             logger.warning("サムネイル画像が見つかりません")
             return None
+
+        # 選定された最も明るいサムネイル画像を利用する
+        thumbnail_data = best_thumbnail_data
 
         battle = files[0].battle
         rule = files[0].rule
