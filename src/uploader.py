@@ -65,6 +65,7 @@ class Uploader:
 
         self._private_status: PrivacyStatus = "private" if os.environ.get(
             "YOUTUBE_VIDEO_PUBLIC", "false").lower() == "false" else "public"
+        self._video_tags = os.environ.get("YOUTUBE_VIDEO_TAGS", "").split(",")
         self._playlist_id = os.environ.get("YOUTUBE_PLAYLIST_ID")
         self._title_template = os.environ.get(
             "YOUTUBE_TITLE_TEMPLATE", "{BATTLE}({RATE}) {RULE} {WIN}勝{LOSE}敗 {DAY} {SCHEDULE}時～")
@@ -106,8 +107,22 @@ class Uploader:
 
             elapsed_time_str = Uploader.format_seconds(elapsed_time)
 
-            chapter_title = self._chapter_template.replace("{RESULT}", file.result).replace("{KILL}", str(file.kill) if file.kill else "-").replace("{DEATH}", str(file.death) if file.death else "-").replace("{SPECIAL}", str(file.special) if file.special else "-").replace(
-                "{STAGE}", file.stage).replace("{RATE}", f"{file.rate.label}{file.rate}" if file.rate else "").replace("{BATTLE}", file.battle).replace("{RULE}", file.rule).replace("{START_TIME}", file.start.strftime("%H:%M:%S"))
+            chapter_title = self._chapter_template
+            result = f"{file.result}  " if file.result == "WIN" else file.result
+            chapter_title = chapter_title.replace("{RESULT}", result)
+            kill = "??" if file.kill is None else f"  {file.kill}" if file.kill < 10 else f"{file.kill}"
+            chapter_title = chapter_title.replace("{KILL}", kill)
+            death = "??" if file.death is None else f"  {file.death}" if file.death < 10 else f"{file.death}"
+            chapter_title = chapter_title.replace("{DEATH}", death)
+            special = "??" if file.special is None else f"  {file.special}" if file.special < 10 else f"{file.special}"
+            chapter_title = chapter_title.replace("{SPECIAL}", special)
+            chapter_title = chapter_title.replace("{STAGE}", file.stage)
+            rate = f"{file.rate.label}{file.rate}" if file.rate else ""
+            chapter_title = chapter_title.replace("{RATE}", rate)
+            chapter_title = chapter_title.replace("{BATTLE}", file.battle)
+            chapter_title = chapter_title.replace("{RULE}", file.rule)
+            start_time = file.start.strftime("%H:%M:%S")
+            chapter_title = chapter_title.replace("{START_TIME}", start_time)
             chapter = f"{elapsed_time_str} {chapter_title}\n"
             chapters += chapter
             elapsed_time += file.length
@@ -332,7 +347,7 @@ class Uploader:
         metadata = result.unwrap()
         logger.info(f"YouTubeにアップロードします: {metadata.title}")
         result = self._youtube.upload(
-            path, metadata.title, metadata.comment, ["スプラトゥーン3"], privacy_status=self._private_status)
+            path, metadata.title, metadata.comment, self._video_tags, privacy_status=self._private_status)
         if result.is_err():
             logger.info(f"YouTubeへのアップロードに失敗しました: {result.unwrap_err()}")
             return None

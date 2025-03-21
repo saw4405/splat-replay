@@ -21,7 +21,7 @@ class BattleResult:
     def to_list(self) -> list[str]:
         start_str = self.start.strftime(
             BattleResult.DATETIME_FORMAT) if self.start else ""
-        return [start_str, self.battle or "", self.rule or "", self.stage or "", self.result or "", str(self.kill or ""), str(self.death or ""), str(self.special or ""), str(self.rate or "")]
+        return [start_str, self.battle or "", self.rule or "", self.stage or "", self.result or "", str(self.kill) if self.kill is not None else "", str(self.death) if self.death is not None else "", str(self.special) if self.special is not None else "", str(self.rate or "")]
 
     @staticmethod
     def from_list(data: list[str]) -> "BattleResult":
