@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageStat
 import srt
 
 from wrapper.youtube import Youtube, PrivacyStatus
@@ -259,6 +259,9 @@ class Uploader:
         # 選定された最も明るいサムネイル画像を利用する
         thumbnail_data = best_thumbnail_data
 
+        win_count = [file.result == "WIN" for file in files].count(True)
+        lose_count = [file.result == "LOSE" for file in files].count(True)
+
         battle = files[0].battle
         rule = files[0].rule
         rates = [file.rate for file in files if file.rate]
@@ -278,15 +281,29 @@ class Uploader:
         stage2 = stages[1] if len(stages) > 1 else None
 
         thumbnail_data = self._design_thumbnail(
-            thumbnail_data, battle, rule, rate, stage1, stage2)
+            thumbnail_data, win_count, lose_count, battle, rule, rate, stage1, stage2)
         return thumbnail_data
 
-    def _design_thumbnail(self, thumbnail_data: bytes, battle: str, rule: str, rate: Optional[str], stage1: Optional[str], stage2: Optional[str]) -> bytes:
+    def _design_thumbnail(self, thumbnail_data: bytes, win_count: int, lose_count: int, battle: str, rule: str, rate: Optional[str], stage1: Optional[str], stage2: Optional[str]) -> bytes:
         thumbnail = Image.open(io.BytesIO(thumbnail_data)).convert("RGBA")
         draw = ImageDraw.Draw(thumbnail)
         # 不要なステージ部分を塗りつぶし
         draw.rounded_rectangle((777, 21, 1849, 750), radius=40,
                                fill=(28, 28, 28), outline=(28, 28, 28), width=1)
+
+        # 勝敗数を追加
+        win_lose = f"{win_count} - {lose_count}"
+        path = os.path.join(self.THUMBNAIL_ASSETS_DIR, "Paintball_Beta.otf")
+        font = ImageFont.truetype(path, 120)
+        bbox = draw.textbbox((0, 0), win_lose, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        centered_position = (458 - text_width // 2, 100 - text_height // 2)
+        for offset in [(-5, 0), (5, 0), (0, -5), (0, 5), (-5, -5), (-5, 5), (5, -5), (5, 5)]:
+            offset_position = (
+                centered_position[0] + offset[0], centered_position[1] + offset[1])
+            draw.text(offset_position, win_lose, fill="black", font=font)
+        draw.text(centered_position, win_lose, fill="yellow", font=font)
 
         # バトルのアイコンを追加
         battle = battle.split("(")[0]
