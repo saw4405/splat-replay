@@ -37,6 +37,26 @@ def test_change_schedule(analyzer: Analyzer, load_image: Callable[[str], cv2.typ
 
 
 @pytest.mark.parametrize("filename,expected", [
+    ("finish_1.png", True),
+    ("finish_2.png", True),
+    ("finish_3.png", True),
+    ("finish_4.png", True),
+    ("finish_5.png", True),
+    ("finish_6.png", True),
+    ("finish_7.png", True),
+    ("finish_8.png", True),
+    ("finish_9.png", True),
+    ("finish_10.png", True),
+    ("finish_11.png", False),
+    ("loading_1.png", False)
+])
+def test_battle_finish(analyzer: Analyzer, load_image: Callable[[str], cv2.typing.MatLike], filename: str, expected: bool):
+    image = load_image(filename)
+    result = analyzer.battle_finish(image)
+    assert result == expected
+
+
+@pytest.mark.parametrize("filename,expected", [
     ("result_1.png", (10, 8, 3)),
     ("result_2.png", (0, 1, 0)),
     ("result_3.png", (9, 9, 2)),
