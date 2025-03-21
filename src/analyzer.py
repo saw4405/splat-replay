@@ -47,6 +47,8 @@ class Analyzer:
         self._matching_matcher = TemplateMatcher(get_full_path("matching.png"))
         self._matching_mask_matcher = HSVMatcher(
             (0, 0, 200), (179, 20, 255), get_full_path("matching_mask.png"))
+        self._change_schedule_matcher = TemplateMatcher(
+            get_full_path("change_schedule.png"))
         self._wait_matcher = TemplateMatcher(get_full_path("wait.png"))
         self._start_matcher = TemplateMatcher(get_full_path("start.png"))
         self._stop_matcher = TemplateMatcher(
@@ -154,6 +156,13 @@ class Analyzer:
         if not self._matching_mask_matcher.match(image):
             return False
         return self._matching_matcher.match(image)
+
+    def change_schedule(self, image: np.ndarray) -> bool:
+        cropped_image = image[444:555, 555:666]
+        if not self.black_screen(cropped_image):
+            return False
+
+        return self._change_schedule_matcher.match(image)
 
     def wait(self, image: np.ndarray) -> bool:
         return self._wait_matcher.match(image)
