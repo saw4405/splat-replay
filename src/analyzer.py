@@ -133,7 +133,7 @@ class Analyzer:
         self._virtual_camera_off_matcher = HashMatcher(
             get_full_path("virtual_camera_off.png"))
         power_off_image_path = get_full_path("power_off.png")
-        self._power_off_matcher = HashMatcher(
+        self._power_off_matcher = TemplateMatcher(
             power_off_image_path) if os.path.exists(power_off_image_path) else None
 
     def virtual_camera_off(self, image: np.ndarray) -> bool:
@@ -303,7 +303,8 @@ class Analyzer:
 
         records: Dict[str, int] = {}
         for name, position in record_positions.items():
-            count_image = image[position["y1"]:position["y2"], position["x1"]:position["x2"]]
+            count_image = image[position["y1"]
+                :position["y2"], position["x1"]:position["x2"]]
 
             # 文字認識の精度向上のため、拡大・余白・白文字・細字化を行う
             count_image = cv2.resize(count_image, (0, 0), fx=3, fy=3)

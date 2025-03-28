@@ -105,7 +105,8 @@
     3. OBSを起動する
     4. ゲーム画面が表示されたら、SwitchをPower OFFする
     5. OBSでスクリーンショットを撮る
-    6. `assets\templates`フォルダに`power_off.png`として保存する
+    6. 特徴的な部分を切り出す (他の画像には出現せず、Power OFF時のみ出現する部位)
+    7. `assets\templates`フォルダに`power_off.png`として保存する
 
 
 
