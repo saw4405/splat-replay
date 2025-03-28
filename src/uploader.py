@@ -241,10 +241,16 @@ class Uploader:
                 continue
             data = result.unwrap()
             try:
-                image = Image.open(io.BytesIO(data)).convert("L")
+                image = Image.open(io.BytesIO(data)).convert("HSV")
                 width, height = image.size
                 cropped_image = image.crop((0, 0, min(750, width), height))
-                brightness = ImageStat.Stat(cropped_image).mean[0]
+                pixel_array = np.array(cropped_image)
+                v_channel = pixel_array[:, :, 2]
+                flat_pixels = v_channel.flatten()
+                num_pixels = len(flat_pixels)
+                n_top = max(1, int(num_pixels * 0.2))
+                top_pixels = np.sort(flat_pixels)[-n_top:]
+                brightness = np.mean(top_pixels)
             except Exception as e:
                 logger.warning(f"サムネイル画像の明るさ計算失敗: {e}")
                 brightness = 0
