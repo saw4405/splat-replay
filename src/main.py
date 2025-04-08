@@ -60,7 +60,7 @@ class Main:
         threading.Thread(target=upload_loop, daemon=True).start()
 
     def _handle_upload(self):
-        self._uploader.upload()
+        self._uploader.start()
 
         if self.SLEEP_AFTER_UPLOAD:
             self._logger.info("スリープします")
