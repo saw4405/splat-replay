@@ -55,7 +55,8 @@ class Editor:
             logger.info(
                 f"タイムスケジュールが{day_str} {time_str}時～の{battle} {rule}の動画を結合します")
 
-            out_path = os.path.join(self.OUTPUT_DIR, f"{day_str}_{time_str}_{battle}_{rule}{files[0].extension}")
+            out_path = os.path.join(
+                self.OUTPUT_DIR, f"{day_str}_{time_str}_{battle}_{rule}{files[0].extension}")
 
             # 動画を結合する
             if len(files) == 1:
@@ -67,7 +68,8 @@ class Editor:
             # タイトルと説明を動画に埋め込む
             title, description = self._generate_title_and_description(
                 files, day, time, battle, rule)
-            FFmpeg.write_metadata(out_path, FFmpeg.Metadata(title, description))
+            FFmpeg.write_metadata(
+                out_path, FFmpeg.Metadata(title, description))
 
             # サムネイル画像を作成して動画に埋め込む
             thumnail_data = self._create_thumbnail(files)
@@ -240,14 +242,16 @@ class Editor:
         return thumbnail_data
 
     def _draw_text_with_outline(self, draw: ImageDraw.ImageDraw, position: Tuple[int, int], text: str, font: ImageFont.FreeTypeFont, outline_color: str, fill_color: str):
-        offsets = [(-5, 0), (5, 0), (0, -5), (0, 5), (-5, -5), (-5, 5), (5, -5), (5, 5)]
+        offsets = [(-5, 0), (5, 0), (0, -5), (0, 5),
+                   (-5, -5), (-5, 5), (5, -5), (5, 5)]
         for dx, dy in offsets:
-            draw.text((position[0]+dx, position[1]+dy), text, fill=outline_color, font=font)
+            draw.text((position[0]+dx, position[1]+dy),
+                      text, fill=outline_color, font=font)
         draw.text(position, text, fill=fill_color, font=font)
 
     def _get_asset_path(self, filename: str) -> str:
         return os.path.join(self.THUMBNAIL_ASSETS_DIR, filename)
-    
+
     def _load_font(self, font_filename: str, size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.truetype(self._get_asset_path(font_filename), size)
 
@@ -265,7 +269,8 @@ class Editor:
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
         centered_position = (458 - text_width // 2, 100 - text_height // 2)
-        self._draw_text_with_outline(draw, centered_position, win_lose, font, outline_color="black", fill_color="yellow")
+        self._draw_text_with_outline(
+            draw, centered_position, win_lose, font, outline_color="black", fill_color="yellow")
 
         # バトルのアイコンを追加
         battle_name = battle.split("(")[0]
@@ -292,7 +297,8 @@ class Editor:
 
         # レートの文字を追加
         if rate:
-            text_color = (1, 249, 196) if battle == "Xマッチ" else (250, 97, 0) if battle.startswith("バンカラマッチ") else "white"
+            text_color = (1, 249, 196) if battle == "Xマッチ" else (
+                250, 97, 0) if battle.startswith("バンカラマッチ") else "white"
             font = self._load_font("Paintball_Beta.otf", 70)
             draw.text((1125, 230), rate, fill=text_color, font=font)
 
@@ -317,6 +323,11 @@ class Editor:
             else:
                 logger.warning(f"ステージ画像が見つかりません: {stage2}")
         # 2つ目のステージがないことはあるので、警告は出さない
+
+        overlay_path = self._get_asset_path("thumbnail_overlay.png")
+        if os.path.exists(overlay_path):
+            overlay_image = Image.open(overlay_path).convert("RGBA")
+            thumbnail = Image.alpha_composite(thumbnail, overlay_image)
 
         buf = io.BytesIO()
         thumbnail.save(buf, format='PNG')
