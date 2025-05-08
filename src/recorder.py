@@ -179,6 +179,12 @@ class Recorder(GracefulThread):
 
     def _handle_wait_status(self, frame: np.ndarray) -> RecordStatus:
 
+        # スケジュール変更を検知したら、状態リセットする
+        if (self._battle_result.start is not None or self._battle_result.rate is not None) and self._analyzer.change_schedule(frame):
+            logger.info("スケジュール変更を検知しました")
+            self._battle_result = BattleResult()
+            return RecordStatus.WAIT
+
         if self._battle_result.start is None:
             # マッチ選択時のレート(XP/ウデマエ)を記録する
             if (rate := self._analyzer.rate(frame)) is not None and self._battle_result.rate != rate:
@@ -189,12 +195,6 @@ class Recorder(GracefulThread):
             if self._analyzer.matching_start(frame):
                 self._battle_result.start = datetime.datetime.now()
                 logger.info("マッチング開始を検知しました")
-
-            # スケジュール変更を検知したら、状態リセットする
-            if self._analyzer.change_schedule(frame):
-                logger.info("スケジュール変更を検知しました")
-                self._battle_result = BattleResult()
-                return RecordStatus.WAIT
 
             # ファイルモードの場合、マッチング中が録画されていない場合があるため、マッチング開始していなくてもバトル開始を監視する
             if self.is_recording_mode:
