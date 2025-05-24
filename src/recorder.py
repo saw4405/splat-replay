@@ -187,7 +187,7 @@ class Recorder(GracefulThread):
 
         if self._battle_result.start is None:
             # マッチ選択時のレート(XP/ウデマエ)を記録する
-            if (rate := self._analyzer.rate(frame)) is not None and self._battle_result.rate != rate:
+            if (rate := self._analyzer.rate(frame)) is not None and (not isinstance(self._battle_result.rate, type(rate)) or self._battle_result.rate != rate):
                 self._battle_result.rate = rate
                 logger.info(f"{rate.label}: {rate}")
 
