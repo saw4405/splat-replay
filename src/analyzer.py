@@ -307,7 +307,7 @@ class Analyzer:
                 :position["y2"], position["x1"]:position["x2"]]
 
             # 文字認識の精度向上のため、拡大・余白・白文字・細字化を行う
-            count_image = cv2.resize(count_image, (0, 0), fx=3, fy=3)
+            count_image = cv2.resize(count_image, (0, 0), fx=3.5, fy=3.5)
             count_image = cv2.copyMakeBorder(
                 count_image, 50, 50, 50, 50, cv2.BORDER_CONSTANT, value=(0, 0, 0))
             count_image = cv2.cvtColor(count_image, cv2.COLOR_BGR2GRAY)

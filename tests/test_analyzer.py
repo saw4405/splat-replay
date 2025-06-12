@@ -60,6 +60,7 @@ def test_battle_finish(analyzer: Analyzer, load_image: Callable[[str], cv2.typin
     ("result_1.png", (10, 8, 3)),
     ("result_2.png", (0, 1, 0)),
     ("result_3.png", (9, 9, 2)),
+    ("result_4.png", (17, 7, 2)),
     ("result_fes.png", (4, 5, 3)),
     ("result_not_lose.png", (11, 7, 3)),
 ])
