@@ -1,3 +1,4 @@
+import sys
 import os
 import time
 from typing import Optional
@@ -6,7 +7,6 @@ import threading
 
 import dotenv
 import schedule
-import win32com.client
 
 from recorder import Recorder
 from uploader import Uploader
@@ -29,6 +29,11 @@ class Main:
         self.UPLOAD_TIME = os.environ["UPLOAD_TIME"]
 
     def _check_capture_device(self, device_name: str) -> bool:
+        if sys.platform != "win32":
+            self._logger.warn("Windowsでないため、チェックをスキップします")
+            return True
+
+        import win32com.client
         wmi = win32com.client.GetObject("winmgmts:")
         devices = wmi.InstancesOf("Win32_PnPEntity")
         return any(str(device.Name) == device_name for device in devices)
