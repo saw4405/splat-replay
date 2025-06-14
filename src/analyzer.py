@@ -109,6 +109,7 @@ class Analyzer:
             "ヤガラ市場": "yagara.png",
             "ユノハナ大渓谷": "yunohana.png",
             "ザトウマーケット": "zatou.png",
+            "デカライン高架下": "dekaline.png",
         })
         self._xp_machers_dictionary = {
             Rectangle(1730, 190, 1880, 240): create_template_matchers({
